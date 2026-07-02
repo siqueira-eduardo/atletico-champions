@@ -4,7 +4,7 @@ import { db } from './firebase'
 import { TIMES, JOGADORES, GOLEIROS, RODADAS, TABS, TIMES_INCOMPLETOS, REGRAS, MATA_MATA } from './data'
 
 // ── senha de admin (só quem souber pode lançar resultados) ──
-const SENHA_ADMIN = "atletico2026"
+const SENHA_ADMIN = "3417"
 
 export default function App() {
   const [tab, setTab] = useState(0)
