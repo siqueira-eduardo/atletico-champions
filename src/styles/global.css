@@ -22,7 +22,7 @@ body {
   min-height: 100vh;
   background:
     linear-gradient(90deg, rgba(16, 17, 19, 0.88), rgba(16, 17, 19, 0.36)),
-    url('/src/assets/background.jpg') center / cover;
+    url('/src/assets/background.jpg') center / cover fixed;
 }
 
 .hero {
@@ -65,7 +65,7 @@ h1 {
   gap: 16px;
   width: min(1120px, calc(100% - 32px));
   margin: 0 auto;
-  padding-bottom: 48px;
+  padding-bottom: 32px;
 }
 
 .metric-card {
@@ -89,9 +89,121 @@ h1 {
   font-size: 2.5rem;
 }
 
+.teams-section,
+.rules-section {
+  width: min(1120px, calc(100% - 32px));
+  margin: 0 auto;
+}
+
+.section-heading {
+  display: grid;
+  gap: 10px;
+  margin: 28px 0 20px;
+}
+
+.section-heading h2 {
+  margin: 0;
+  font-size: clamp(2rem, 4vw, 3.4rem);
+}
+
+.section-heading p:last-child {
+  margin: 0;
+  color: #d4d4d8;
+}
+
+.teams-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.team-card {
+  display: grid;
+  gap: 18px;
+  padding: 22px;
+  border: 1px solid rgba(248, 250, 252, 0.16);
+  border-radius: 8px;
+  background: rgba(16, 17, 19, 0.88);
+}
+
+.team-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.team-card h3 {
+  margin: 0;
+  font-size: 1.4rem;
+}
+
+.team-card-header span {
+  flex: 0 0 auto;
+  color: #101113;
+  background: #facc15;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.goalkeeper-row {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border-left: 4px solid #facc15;
+  background: rgba(250, 204, 21, 0.1);
+}
+
+.goalkeeper-row span {
+  color: #d4d4d8;
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.goalkeeper-row strong {
+  font-size: 1.1rem;
+}
+
+.player-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.player-list li {
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  color: #f8fafc;
+  background: rgba(248, 250, 252, 0.08);
+  font-weight: 700;
+}
+
+.rules-section {
+  display: grid;
+  gap: 10px;
+  padding: 28px 0 56px;
+}
+
+.rules-section p {
+  margin: 0;
+  color: #d4d4d8;
+}
+
 @media (max-width: 640px) {
   .hero {
     min-height: 52vh;
     padding: 32px 20px;
+  }
+
+  .player-list {
+    grid-template-columns: 1fr;
   }
 }
