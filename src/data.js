@@ -3,7 +3,7 @@ export const TIMES = [
   { id: 2, nome: "Juventus", capitao: "Enrique Magalhães", cor: "#333333", corSecundaria: "#FFFFFF" },
   { id: 3, nome: "Real Madrid", capitao: "G. Baia", cor: "#00529F", corSecundaria: "#FFD700" },
   { id: 4, nome: "Milan", capitao: "Riquelme Batista", cor: "#FB090B", corSecundaria: "#000000" },
-  { id: 5, nome: "Barcelona", capitao: "Gabriel Honorato", cor: "#A50044", corSecundaria: "#004D98" },
+  { id: 5, nome: "Barcelona", capitao: "Cosmim", cor: "#A50044", corSecundaria: "#004D98" },
   { id: 6, nome: "Roma", capitao: "Gleyck Isídio", cor: "#8E1F2F", corSecundaria: "#F0BC42" },
 ]
 
@@ -14,7 +14,7 @@ export const JOGADORES = [
   { nome: "Wesley Victor", time: 1, funcao: "Jogador", posicao: null },
   { nome: "Vitor Ratinho", time: 1, funcao: "Jogador", posicao: null },
   { nome: "G. Queiroz", time: 1, funcao: "Jogador", posicao: null },
-  { nome: "Japa", time: 1, funcao: "Jogador", posicao: null },
+  { nome: "Waldin", time: 1, funcao: "Jogador", posicao: null },
   { nome: "Rômulo", time: 1, funcao: "Jogador", posicao: null },
 
   // Juventus ✅ (7 linha + goleiro)
@@ -45,13 +45,13 @@ export const JOGADORES = [
   { nome: "Dedé Isídio", time: 4, funcao: "Jogador", posicao: null },
 
   // Barcelona ✅ (7 linha + goleiro)
-  { nome: "Gabriel Honorato", time: 5, funcao: "Capitão", posicao: null },
   { nome: "Bruno Elves", time: 5, funcao: "Jogador", posicao: null },
   { nome: "Fagner Forasteiro", time: 5, funcao: "Jogador", posicao: null },
   { nome: "Chico", time: 5, funcao: "Jogador", posicao: null },
   { nome: "Panchuca", time: 5, funcao: "Jogador", posicao: null },
-  { nome: "Cosmim", time: 5, funcao: "Jogador", posicao: null },
+  { nome: "Cosmim", time: 5, funcao: "Capitão", posicao: null },
   { nome: "Renato", time: 5, funcao: "Jogador", posicao: null },
+  { nome: "Japa", time: 5, funcao: "Jogador", posicao: null },
 
   // Roma ✅ (7 linha + goleiro)
   { nome: "Gleyck Isídio", time: 6, funcao: "Capitão", posicao: null },

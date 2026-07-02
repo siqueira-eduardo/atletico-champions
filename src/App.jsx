@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { ref, onValue, set, push } from 'firebase/database'
-import { db } from './firebase'
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth'
+import { auth, db } from './firebase'
 import { TIMES, JOGADORES, GOLEIROS, RODADAS, TABS, TIMES_INCOMPLETOS, REGRAS, MATA_MATA } from './data'
 
 // ── senha de admin (só quem souber pode lançar resultados) ──
@@ -19,10 +20,18 @@ export default function App() {
   const [placar, setPlacar] = useState({ casa: "", fora: "" })
   const [mvpSelecionado, setMvpSelecionado] = useState("")
   const [sumulaObservacoes, setSumulaObservacoes] = useState("")
+  const [cartoesPartida, setCartoesPartida] = useState([])
+  const [formCartao, setFormCartao] = useState({ jogador: "", tipo: "amarelo" })
+  const [ocorrenciasPartida, setOcorrenciasPartida] = useState([])
+  const [novaOcorrencia, setNovaOcorrencia] = useState("")
   const [timeSelecionado, setTimeSelecionado] = useState(1)
   const [jogadorSelecionado, setJogadorSelecionado] = useState(null)
   const [isAdmin, setIsAdmin] = useState(false)
+  const [adminModo, setAdminModo] = useState(null)
+  const [authUser, setAuthUser] = useState(null)
+  const [adminEmail, setAdminEmail] = useState("")
   const [senhaInput, setSenhaInput] = useState("")
+  const [authError, setAuthError] = useState("")
   const [loading, setLoading] = useState(true)
   const [fotos, setFotos] = useState({})
   const [novaFotoUrl, setNovaFotoUrl] = useState("")
@@ -46,6 +55,28 @@ export default function App() {
       })
     )
     return () => unsubs.forEach(u => u())
+  }, [])
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, user => {
+      setAuthUser(user)
+      if (user) {
+        setIsAdmin(true)
+        setAdminModo("firebase")
+        setAuthError("")
+        return
+      }
+
+      setAdminModo(modo => {
+        if (modo === "firebase") {
+          setIsAdmin(false)
+          return null
+        }
+        return modo
+      })
+    })
+
+    return unsubscribe
   }, [])
 
   const getTimeByNome = (nome) => TIMES.find(t => t.nome === nome)
@@ -126,6 +157,7 @@ export default function App() {
     if (!isAdmin) return
     const key = `${rodada}-${jogoIdx}`
     const r = resultados[key] || {}
+    const sumulaAtual = sumulas[key] || {}
     const golsSalvos = Array.isArray(gols[key]) ? gols[key] : []
     const assistenciasSalvas = Array.isArray(assistencias[key]) ? assistencias[key] : []
     const golsComAssistencias = golsSalvos.map((g, i) => ({
@@ -138,6 +170,10 @@ export default function App() {
     setGolsPartida(golsComAssistencias)
     setMvpSelecionado(mvps[key] || "")
     setSumulaObservacoes(sumulas[key]?.observacoes || "")
+    setCartoesPartida(Array.isArray(sumulaAtual.cartoes) ? sumulaAtual.cartoes : [])
+    setOcorrenciasPartida(Array.isArray(sumulaAtual.ocorrencias) ? sumulaAtual.ocorrencias : [])
+    setNovaOcorrencia("")
+    setFormCartao({ jogador: "", tipo: "amarelo" })
     setFormGol({ jogador: "", assistencia: "" })
   }
 
@@ -164,6 +200,63 @@ export default function App() {
     setPlacar(contarGolsPorTime(novosGols, modalJogo.casa, modalJogo.fora))
   }
 
+  const adicionarCartao = () => {
+    if (!formCartao.jogador) return
+    const jog = JOGADORES.find(j => j.nome === formCartao.jogador)
+    setCartoesPartida(prev => [
+      ...prev,
+      { jogador: formCartao.jogador, time: jog?.time || "", tipo: formCartao.tipo }
+    ])
+    setFormCartao({ jogador: "", tipo: "amarelo" })
+  }
+
+  const removerCartao = (idxCartao) => {
+    setCartoesPartida(prev => prev.filter((_, idx) => idx !== idxCartao))
+  }
+
+  const adicionarOcorrencia = (texto = novaOcorrencia) => {
+    const ocorrencia = texto.trim()
+    if (!ocorrencia) return
+    setOcorrenciasPartida(prev => [...prev, ocorrencia])
+    setNovaOcorrencia("")
+  }
+
+  const removerOcorrencia = (idxOcorrencia) => {
+    setOcorrenciasPartida(prev => prev.filter((_, idx) => idx !== idxOcorrencia))
+  }
+
+  const validarSumula = (placarFinal, golsNormalizados) => {
+    const avisos = []
+    const placarPorGols = contarGolsPorTime(golsNormalizados, modalJogo.casa, modalJogo.fora)
+    const placarDiferente =
+      String(placarFinal.casa) !== String(placarPorGols.casa) ||
+      String(placarFinal.fora) !== String(placarPorGols.fora)
+
+    if (placarDiferente) {
+      avisos.push(`O placar informado (${placarFinal.casa} x ${placarFinal.fora}) não bate com os gols lançados (${placarPorGols.casa} x ${placarPorGols.fora}).`)
+    }
+    if (!mvpSelecionado) avisos.push("Nenhum MVP foi selecionado.")
+    if (golsNormalizados.some(g => g.assistencia && g.assistencia === g.jogador)) {
+      avisos.push("Existe gol com assistência do próprio autor.")
+    }
+    if (ocorrenciasPartida.some(o => /w\.?o/i.test(o)) && !sumulaObservacoes.trim()) {
+      avisos.push("Súmula com W.O. precisa ter observação explicando a ocorrência.")
+    }
+
+    return avisos
+  }
+
+  const salvarHistoricoSumula = async (key, acao, anterior) => {
+    if (!anterior) return
+    const historicoRef = push(ref(db, `historicoSumulas/${key}`))
+    await set(historicoRef, {
+      acao,
+      anterior,
+      alteradoEm: new Date().toISOString(),
+      alteradoPor: authUser?.email || (adminModo === "pin" ? "PIN local" : "admin"),
+    })
+  }
+
   const salvarPartida = async () => {
     if (!modalJogo) return
     const key = modalJogo.key
@@ -176,7 +269,19 @@ export default function App() {
     const assistenciasPartida = golsNormalizados
       .filter(g => g.assistencia)
       .map(g => ({ jogador: g.assistencia, time: g.assistenciaTime }))
+    const cartoesNormalizados = cartoesPartida.map(c => ({
+      jogador: c.jogador,
+      time: c.time || getTimeDoJogador(c.jogador) || "",
+      tipo: c.tipo,
+    }))
+    const ocorrenciasNormalizadas = ocorrenciasPartida.map(o => String(o).trim()).filter(Boolean)
     const placarFinal = { casa: String(placar.casa || 0), fora: String(placar.fora || 0) }
+    const avisos = validarSumula(placarFinal, golsNormalizados)
+
+    if (avisos.length > 0 && !window.confirm(`Conferir súmula:\n\n${avisos.join("\n")}\n\nDeseja salvar mesmo assim?`)) {
+      return
+    }
+
     const resultado = { casa: modalJogo.casa, fora: modalJogo.fora, placar: placarFinal }
     const sumula = {
       rodada: modalJogo.rodada,
@@ -186,11 +291,15 @@ export default function App() {
       placar: placarFinal,
       gols: golsNormalizados,
       assistencias: assistenciasPartida,
+      cartoes: cartoesNormalizados,
+      ocorrencias: ocorrenciasNormalizadas,
       mvp: mvpSelecionado || "",
       observacoes: sumulaObservacoes.trim(),
       atualizadaEm: new Date().toISOString(),
+      atualizadaPor: authUser?.email || (adminModo === "pin" ? "PIN local" : "admin"),
     }
 
+    await salvarHistoricoSumula(key, sumulas[key] ? "edicao" : "criacao", sumulas[key])
     await set(ref(db, `resultados/${key}`), resultado)
     await set(ref(db, `gols/${key}`), golsNormalizados)
     await set(ref(db, `assistencias/${key}`), assistenciasPartida)
@@ -199,9 +308,98 @@ export default function App() {
     setModalJogo(null)
   }
 
-  const entrarAdmin = () => {
-    if (senhaInput === SENHA_ADMIN) { setIsAdmin(true); setSenhaInput("") }
-    else alert("Senha incorreta!")
+  const excluirSumula = async () => {
+    if (!modalJogo) return
+    const key = modalJogo.key
+    if (!window.confirm("Excluir esta súmula? A classificação e estatísticas desse jogo serão removidas.")) return
+
+    await salvarHistoricoSumula(key, "exclusao", {
+      resultado: resultados[key] || null,
+      gols: gols[key] || [],
+      assistencias: assistencias[key] || [],
+      mvp: mvps[key] || "",
+      sumula: sumulas[key] || null,
+    })
+    await set(ref(db, `resultados/${key}`), null)
+    await set(ref(db, `gols/${key}`), null)
+    await set(ref(db, `assistencias/${key}`), null)
+    await set(ref(db, `mvps/${key}`), null)
+    await set(ref(db, `sumulas/${key}`), null)
+    setModalJogo(null)
+  }
+
+  const entrarAdmin = async () => {
+    setAuthError("")
+    if (adminEmail.trim()) {
+      try {
+        await signInWithEmailAndPassword(auth, adminEmail.trim(), senhaInput)
+        setSenhaInput("")
+      } catch {
+        setAuthError("Não foi possível entrar com esse e-mail/senha.")
+      }
+      return
+    }
+
+    if (senhaInput === SENHA_ADMIN) {
+      setIsAdmin(true)
+      setAdminModo("pin")
+      setSenhaInput("")
+    } else {
+      setAuthError("Senha incorreta.")
+    }
+  }
+
+  const sairAdmin = async () => {
+    if (adminModo === "firebase") await signOut(auth)
+    setIsAdmin(false)
+    setAdminModo(null)
+    setAuthUser(null)
+  }
+
+  const baixarArquivo = (nome, conteudo, tipo) => {
+    const blob = new Blob([conteudo], { type: tipo })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = nome
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const exportarBackup = () => {
+    const backup = {
+      exportadoEm: new Date().toISOString(),
+      times: TIMES,
+      jogadores: JOGADORES,
+      goleiros: GOLEIROS,
+      resultados,
+      gols,
+      assistencias,
+      mvps,
+      sumulas,
+      fotos,
+    }
+    baixarArquivo("atletico-champions-backup.json", JSON.stringify(backup, null, 2), "application/json")
+  }
+
+  const exportarCSV = () => {
+    const linhas = [["rodada", "jogo", "casa", "gols_casa", "gols_fora", "fora", "mvp", "observacoes"]]
+    Object.entries(resultados).forEach(([key, r]) => {
+      if (!r?.placar) return
+      const s = sumulas[key] || {}
+      linhas.push([
+        key.split("-")[0],
+        key,
+        r.casa,
+        r.placar.casa,
+        r.placar.fora,
+        r.fora,
+        mvps[key] || "",
+        s.observacoes || "",
+      ])
+    })
+    const csv = linhas.map(linha => linha.map(valor => `"${String(valor).replace(/"/g, '""')}"`).join(",")).join("\n")
+    baixarArquivo("atletico-champions-resultados.csv", csv, "text/csv;charset=utf-8")
   }
 
   const adicionarFoto = async () => {
@@ -307,6 +505,8 @@ export default function App() {
     const golsJogo = Array.isArray(gols[key]) ? gols[key] : []
     const sumulaJogo = sumulas[key]
     const mvpJogo = mvps[key]
+    const cartoesJogo = Array.isArray(sumulaJogo?.cartoes) ? sumulaJogo.cartoes : []
+    const ocorrenciasJogo = Array.isArray(sumulaJogo?.ocorrencias) ? sumulaJogo.ocorrencias : []
     let texto = `📋 SÚMULA OFICIAL - CHAMPIONS LEAGUE ATLÉTICO PARAÍSO\n\n`
     texto += `${jogo[0]} ${res.placar.casa} x ${res.placar.fora} ${jogo[1]}\n\n`
     if (golsJogo.length > 0) {
@@ -314,6 +514,16 @@ export default function App() {
       golsJogo.forEach(g => {
         texto += g.assistencia ? `${g.jogador} (assist: ${g.assistencia})\n` : `${g.jogador}\n`
       })
+      texto += `\n`
+    }
+    if (cartoesJogo.length > 0) {
+      texto += `🟨 Cartões:\n`
+      cartoesJogo.forEach(c => { texto += `${c.tipo === "vermelho" ? "🟥" : "🟨"} ${c.jogador}\n` })
+      texto += `\n`
+    }
+    if (ocorrenciasJogo.length > 0) {
+      texto += `📌 Ocorrências:\n`
+      ocorrenciasJogo.forEach(o => { texto += `${o}\n` })
       texto += `\n`
     }
     if (mvpJogo) texto += `🌟 MVP: ${mvpJogo}\n`
@@ -361,19 +571,29 @@ export default function App() {
               <div style={{ fontSize: 12, color: "#6b7db3", letterSpacing: 2 }}>ATLÉTICO PARAÍSO • 2026</div>
             </div>
             {!isAdmin ? (
-              <div style={{ display: "flex", gap: 6 }}>
-                <input placeholder="Senha admin" type="password" value={senhaInput}
-                  onChange={e => setSenhaInput(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && entrarAdmin()}
-                  style={{ width: 110, padding: "6px 8px", background: "#1a1f3a", border: "1px solid #1e2d5a", borderRadius: 6, color: "#fff", fontSize: 12 }} />
-                <button onClick={entrarAdmin} style={{ padding: "6px 10px", background: "#FFD700", border: "none", borderRadius: 6, fontWeight: 700, fontSize: 11, cursor: "pointer", color: "#0a0e1a" }}>
-                  Entrar
-                </button>
+              <div style={{ display: "grid", gap: 5, width: 220 }}>
+                <input placeholder="E-mail admin (opcional)" type="email" value={adminEmail}
+                  onChange={e => setAdminEmail(e.target.value)}
+                  style={{ padding: "6px 8px", background: "#1a1f3a", border: "1px solid #1e2d5a", borderRadius: 6, color: "#fff", fontSize: 12 }} />
+                <div style={{ display: "flex", gap: 6 }}>
+                  <input placeholder="Senha ou PIN" type="password" value={senhaInput}
+                    onChange={e => setSenhaInput(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && entrarAdmin()}
+                    style={{ minWidth: 0, flex: 1, padding: "6px 8px", background: "#1a1f3a", border: "1px solid #1e2d5a", borderRadius: 6, color: "#fff", fontSize: 12 }} />
+                  <button onClick={entrarAdmin} style={{ padding: "6px 10px", background: "#FFD700", border: "none", borderRadius: 6, fontWeight: 700, fontSize: 11, cursor: "pointer", color: "#0a0e1a" }}>
+                    Entrar
+                  </button>
+                </div>
+                {authError && <div style={{ color: "#f44336", fontSize: 10 }}>{authError}</div>}
               </div>
             ) : (
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 11, color: "#4caf50", fontWeight: 700 }}>✓ ADMIN</span>
-                <button onClick={() => setIsAdmin(false)} style={{ padding: "4px 8px", background: "none", border: "1px solid #f44336", borderRadius: 6, color: "#f44336", fontSize: 11, cursor: "pointer" }}>Sair</button>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                <span style={{ fontSize: 11, color: "#4caf50", fontWeight: 700 }}>
+                  ✓ ADMIN {authUser?.email ? `• ${authUser.email}` : "• PIN"}
+                </span>
+                <button onClick={exportarBackup} style={{ padding: "4px 8px", background: "none", border: "1px solid #1e2d5a", borderRadius: 6, color: "#FFD700", fontSize: 11, cursor: "pointer" }}>JSON</button>
+                <button onClick={exportarCSV} style={{ padding: "4px 8px", background: "none", border: "1px solid #1e2d5a", borderRadius: 6, color: "#6CABDD", fontSize: 11, cursor: "pointer" }}>CSV</button>
+                <button onClick={sairAdmin} style={{ padding: "4px 8px", background: "none", border: "1px solid #f44336", borderRadius: 6, color: "#f44336", fontSize: 11, cursor: "pointer" }}>Sair</button>
               </div>
             )}
           </div>
@@ -1041,8 +1261,8 @@ export default function App() {
         const artMap = calcArtilheiros()
         const assMap = calcAssistencias()
         const mvpMap = calcMvps()
-        const gols = artMap.find(a => a.nome === j.nome)?.gols || 0
-        const assists = assMap.find(a => a.nome === j.nome)?.assists || 0
+        const golsTotal = artMap.find(a => a.nome === j.nome)?.gols || 0
+        const assistsTotal = assMap.find(a => a.nome === j.nome)?.assists || 0
         const mvpsTotal = mvpMap.find(m => m.nome === j.nome)?.count || 0
 
         // jogos disputados (partidas onde o time jogou)
@@ -1050,8 +1270,8 @@ export default function App() {
           r?.placar && (r.casa === time?.nome || r.fora === time?.nome)
         )
         const totalJogos = jogosDoTime.length
-        const mediaGols = totalJogos > 0 ? (gols / totalJogos).toFixed(2) : "0.00"
-        const mediaAssists = totalJogos > 0 ? (assists / totalJogos).toFixed(2) : "0.00"
+        const mediaGols = totalJogos > 0 ? (golsTotal / totalJogos).toFixed(2) : "0.00"
+        const mediaAssists = totalJogos > 0 ? (assistsTotal / totalJogos).toFixed(2) : "0.00"
 
         // partidas com gol do jogador
         const golsPorPartida = Object.entries(Object.fromEntries(
@@ -1091,8 +1311,8 @@ export default function App() {
                 {/* Stats principais */}
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8, marginBottom: 20 }}>
                   {[
-                    { label: "Gols", value: gols, icon: "⚽", cor: "#FFD700" },
-                    { label: "Assists", value: assists, icon: "🎯", cor: "#6CABDD" },
+                    { label: "Gols", value: golsTotal, icon: "⚽", cor: "#FFD700" },
+                    { label: "Assists", value: assistsTotal, icon: "🎯", cor: "#6CABDD" },
                     { label: "MVPs", value: mvpsTotal, icon: "🌟", cor: "#c084fc" },
                     { label: "Jogos", value: totalJogos, icon: "📅", cor: "#4caf50" },
                   ].map(s => (
@@ -1117,7 +1337,7 @@ export default function App() {
                       <div style={{ fontSize: 11, color: "#6b7db3" }}>assists/jogo</div>
                     </div>
                     <div style={{ textAlign: "center" }}>
-                      <div style={{ fontWeight: 800, fontSize: 18, color: "#4caf50" }}>{totalJogos > 0 ? (gols + assists).toFixed(0) : 0}</div>
+                      <div style={{ fontWeight: 800, fontSize: 18, color: "#4caf50" }}>{totalJogos > 0 ? (golsTotal + assistsTotal).toFixed(0) : 0}</div>
                       <div style={{ fontSize: 11, color: "#6b7db3" }}>contribuições</div>
                     </div>
                   </div>
@@ -1225,6 +1445,62 @@ export default function App() {
                   })}
                 </div>
               )}
+              <div style={{ background: "#0d1228", borderRadius: 10, padding: 14, marginBottom: 16 }}>
+                <div style={{ fontWeight: 700, marginBottom: 12, fontSize: 13, color: "#ff9800" }}>🟨 Cartões</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 120px", gap: 8 }}>
+                  <select value={formCartao.jogador} onChange={e => setFormCartao(f => ({ ...f, jogador: e.target.value }))} style={S.select}>
+                    <option value="">Jogador</option>
+                    {todosJogadores.map(j => <option key={j.nome} value={j.nome}>{j.nome}</option>)}
+                  </select>
+                  <select value={formCartao.tipo} onChange={e => setFormCartao(f => ({ ...f, tipo: e.target.value }))} style={S.select}>
+                    <option value="amarelo">Amarelo</option>
+                    <option value="vermelho">Vermelho</option>
+                  </select>
+                </div>
+                <button onClick={adicionarCartao} style={{ ...S.btn, background: "#ff9800" }}>+ Adicionar Cartão</button>
+                {cartoesPartida.length > 0 && (
+                  <div style={{ marginTop: 10 }}>
+                    {cartoesPartida.map((c, i) => {
+                      const t = TIMES.find(t => t.id === c.time)
+                      return (
+                        <div key={`${c.jogador}-${i}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid #1e2d5a", fontSize: 13 }}>
+                          <span>{c.tipo === "vermelho" ? "🟥" : "🟨"}</span>
+                          <span style={{ fontWeight: 600 }}>{c.jogador}</span>
+                          <span style={{ fontSize: 11, color: t?.cor }}>{t?.nome}</span>
+                          <button onClick={() => removerCartao(i)}
+                            style={{ marginLeft: "auto", background: "none", border: "none", color: "#f44336", cursor: "pointer", fontSize: 16 }}>✕</button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ background: "#0d1228", borderRadius: 10, padding: 14, marginBottom: 16 }}>
+                <div style={{ fontWeight: 700, marginBottom: 12, fontSize: 13, color: "#6CABDD" }}>📌 Ocorrências</div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+                  <button onClick={() => adicionarOcorrencia(`W.O. para ${modalJogo.casa}`)} style={{ padding: "6px 8px", background: "none", border: "1px solid #1e2d5a", borderRadius: 6, color: "#FFD700", fontSize: 11, cursor: "pointer" }}>W.O. {modalJogo.casa}</button>
+                  <button onClick={() => adicionarOcorrencia(`W.O. para ${modalJogo.fora}`)} style={{ padding: "6px 8px", background: "none", border: "1px solid #1e2d5a", borderRadius: 6, color: "#FFD700", fontSize: 11, cursor: "pointer" }}>W.O. {modalJogo.fora}</button>
+                  <button onClick={() => adicionarOcorrencia("Atraso registrado")} style={{ padding: "6px 8px", background: "none", border: "1px solid #1e2d5a", borderRadius: 6, color: "#6CABDD", fontSize: 11, cursor: "pointer" }}>Atraso</button>
+                </div>
+                <input placeholder="Outra ocorrência" value={novaOcorrencia} onChange={e => setNovaOcorrencia(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && adicionarOcorrencia()}
+                  style={S.select} />
+                <button onClick={() => adicionarOcorrencia()} style={S.btn}>+ Adicionar Ocorrência</button>
+                {ocorrenciasPartida.length > 0 && (
+                  <div style={{ marginTop: 10 }}>
+                    {ocorrenciasPartida.map((o, i) => (
+                      <div key={`${o}-${i}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid #1e2d5a", fontSize: 13 }}>
+                        <span>📌</span>
+                        <span style={{ flex: 1 }}>{o}</span>
+                        <button onClick={() => removerOcorrencia(i)}
+                          style={{ marginLeft: "auto", background: "none", border: "none", color: "#f44336", cursor: "pointer", fontSize: 16 }}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div style={{ marginBottom: 20 }}>
                 <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13, color: "#6CABDD" }}>📝 Observações da Súmula</div>
                 <textarea
@@ -1243,6 +1519,12 @@ export default function App() {
                 </select>
               </div>
               <button onClick={salvarPartida} style={S.btnSalvar}>💾 Salvar Súmula e Atualizar Tudo</button>
+              {sumulas[modalJogo.key] && (
+                <button onClick={excluirSumula}
+                  style={{ width: "100%", marginTop: 10, padding: "10px", background: "none", border: "1px solid #f44336", borderRadius: 8, color: "#f44336", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
+                  Excluir Súmula
+                </button>
+              )}
             </div>
           </div>
         </div>
