@@ -12,11 +12,13 @@ export default function App() {
   const [gols, setGols] = useState({})
   const [assistencias, setAssistencias] = useState({})
   const [mvps, setMvps] = useState({})
+  const [sumulas, setSumulas] = useState({})
   const [modalJogo, setModalJogo] = useState(null)
   const [formGol, setFormGol] = useState({ jogador: "", assistencia: "" })
   const [golsPartida, setGolsPartida] = useState([])
   const [placar, setPlacar] = useState({ casa: "", fora: "" })
   const [mvpSelecionado, setMvpSelecionado] = useState("")
+  const [sumulaObservacoes, setSumulaObservacoes] = useState("")
   const [timeSelecionado, setTimeSelecionado] = useState(1)
   const [jogadorSelecionado, setJogadorSelecionado] = useState(null)
   const [isAdmin, setIsAdmin] = useState(false)
@@ -34,6 +36,7 @@ export default function App() {
       { key: 'gols', setter: setGols },
       { key: 'assistencias', setter: setAssistencias },
       { key: 'mvps', setter: setMvps },
+      { key: 'sumulas', setter: setSumulas },
       { key: 'fotos', setter: setFotos },
     ]
     const unsubs = refs.map(({ key, setter }) =>
@@ -46,6 +49,19 @@ export default function App() {
   }, [])
 
   const getTimeByNome = (nome) => TIMES.find(t => t.nome === nome)
+  const getTimeDoJogador = (nome) => JOGADORES.find(j => j.nome === nome)?.time
+  const contarGolsPorTime = (lista, casaNome, foraNome) => {
+    const casaId = getTimeByNome(casaNome)?.id
+    const foraId = getTimeByNome(foraNome)?.id
+    const total = { casa: 0, fora: 0 }
+
+    lista.forEach(g => {
+      if (g.time === casaId) total.casa++
+      if (g.time === foraId) total.fora++
+    })
+
+    return { casa: String(total.casa), fora: String(total.fora) }
+  }
 
   const calcClassificacao = () => {
     const tabela = TIMES.map(t => ({ ...t, pts: 0, j: 0, v: 0, e: 0, d: 0, gp: 0, gc: 0, sg: 0 }))
@@ -110,35 +126,76 @@ export default function App() {
     if (!isAdmin) return
     const key = `${rodada}-${jogoIdx}`
     const r = resultados[key] || {}
+    const golsSalvos = Array.isArray(gols[key]) ? gols[key] : []
+    const assistenciasSalvas = Array.isArray(assistencias[key]) ? assistencias[key] : []
+    const golsComAssistencias = golsSalvos.map((g, i) => ({
+      ...g,
+      assistencia: g.assistencia || assistenciasSalvas[i]?.jogador || "",
+      assistenciaTime: g.assistenciaTime || assistenciasSalvas[i]?.time || getTimeDoJogador(assistenciasSalvas[i]?.jogador) || "",
+    }))
     setModalJogo({ key, rodada, jogoIdx, casa, fora })
     setPlacar({ casa: r.placar?.casa || "", fora: r.placar?.fora || "" })
-    setGolsPartida(Array.isArray(gols[key]) ? gols[key] : [])
+    setGolsPartida(golsComAssistencias)
     setMvpSelecionado(mvps[key] || "")
+    setSumulaObservacoes(sumulas[key]?.observacoes || "")
     setFormGol({ jogador: "", assistencia: "" })
   }
 
   const salvarGol = () => {
-    if (!formGol.jogador) return
+    if (!formGol.jogador || !modalJogo) return
     const jog = JOGADORES.find(j => j.nome === formGol.jogador)
     const assJog = JOGADORES.find(j => j.nome === formGol.assistencia)
-    const novoGol = { jogador: formGol.jogador, time: jog?.time }
+    const novoGol = {
+      jogador: formGol.jogador,
+      time: jog?.time || "",
+      assistencia: formGol.assistencia || "",
+      assistenciaTime: formGol.assistencia ? (assJog?.time || "") : "",
+    }
     const novosGols = [...golsPartida, novoGol]
     setGolsPartida(novosGols)
-    if (formGol.assistencia) {
-      const key = modalJogo.key
-      const novaAss = { jogador: formGol.assistencia, time: assJog?.time }
-      const assAtuais = Array.isArray(assistencias[key]) ? assistencias[key] : []
-      set(ref(db, `assistencias/${key}`), [...assAtuais, novaAss])
-    }
+    setPlacar(contarGolsPorTime(novosGols, modalJogo.casa, modalJogo.fora))
     setFormGol({ jogador: "", assistencia: "" })
+  }
+
+  const removerGol = (idxGol) => {
+    if (!modalJogo) return
+    const novosGols = golsPartida.filter((_, idx) => idx !== idxGol)
+    setGolsPartida(novosGols)
+    setPlacar(contarGolsPorTime(novosGols, modalJogo.casa, modalJogo.fora))
   }
 
   const salvarPartida = async () => {
     if (!modalJogo) return
     const key = modalJogo.key
-    await set(ref(db, `resultados/${key}`), { casa: modalJogo.casa, fora: modalJogo.fora, placar: { ...placar } })
-    await set(ref(db, `gols/${key}`), golsPartida)
+    const golsNormalizados = golsPartida.map(g => ({
+      jogador: g.jogador,
+      time: g.time || getTimeDoJogador(g.jogador) || "",
+      assistencia: g.assistencia || "",
+      assistenciaTime: g.assistencia ? (g.assistenciaTime || getTimeDoJogador(g.assistencia) || "") : "",
+    }))
+    const assistenciasPartida = golsNormalizados
+      .filter(g => g.assistencia)
+      .map(g => ({ jogador: g.assistencia, time: g.assistenciaTime }))
+    const placarFinal = { casa: String(placar.casa || 0), fora: String(placar.fora || 0) }
+    const resultado = { casa: modalJogo.casa, fora: modalJogo.fora, placar: placarFinal }
+    const sumula = {
+      rodada: modalJogo.rodada,
+      jogoIdx: modalJogo.jogoIdx,
+      casa: modalJogo.casa,
+      fora: modalJogo.fora,
+      placar: placarFinal,
+      gols: golsNormalizados,
+      assistencias: assistenciasPartida,
+      mvp: mvpSelecionado || "",
+      observacoes: sumulaObservacoes.trim(),
+      atualizadaEm: new Date().toISOString(),
+    }
+
+    await set(ref(db, `resultados/${key}`), resultado)
+    await set(ref(db, `gols/${key}`), golsNormalizados)
+    await set(ref(db, `assistencias/${key}`), assistenciasPartida)
     await set(ref(db, `mvps/${key}`), mvpSelecionado)
+    await set(ref(db, `sumulas/${key}`), sumula)
     setModalJogo(null)
   }
 
@@ -248,20 +305,24 @@ export default function App() {
     const res = resultados[key]
     if (!res) return
     const golsJogo = Array.isArray(gols[key]) ? gols[key] : []
+    const sumulaJogo = sumulas[key]
     const mvpJogo = mvps[key]
-    let texto = `🏆 CHAMPIONS LEAGUE - ATLÉTICO PARAÍSO\n\n`
+    let texto = `📋 SÚMULA OFICIAL - CHAMPIONS LEAGUE ATLÉTICO PARAÍSO\n\n`
     texto += `${jogo[0]} ${res.placar.casa} x ${res.placar.fora} ${jogo[1]}\n\n`
     if (golsJogo.length > 0) {
       texto += `⚽ Gols:\n`
-      golsJogo.forEach(g => { texto += `${g.jogador}\n` })
+      golsJogo.forEach(g => {
+        texto += g.assistencia ? `${g.jogador} (assist: ${g.assistencia})\n` : `${g.jogador}\n`
+      })
       texto += `\n`
     }
     if (mvpJogo) texto += `🌟 MVP: ${mvpJogo}\n`
+    if (sumulaJogo?.observacoes) texto += `📝 Observações: ${sumulaJogo.observacoes}\n`
     if (navigator.share) {
       navigator.share({ text: texto }).catch(() => {})
     } else {
       navigator.clipboard.writeText(texto)
-      alert("Resultado copiado! Cole no WhatsApp do grupo 📋")
+      alert("Súmula copiada! Cole no WhatsApp do grupo 📋")
     }
   }
 
@@ -1110,7 +1171,7 @@ export default function App() {
           <div style={{ background: "#111827", border: "1px solid #1e2d5a", borderRadius: 16, width: "100%", maxWidth: 460, maxHeight: "90vh", overflowY: "auto" }}>
             <div style={{ padding: 20 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-                <div style={{ fontWeight: 800, fontSize: 16 }}>📋 Registrar Partida</div>
+                <div style={{ fontWeight: 800, fontSize: 16 }}>📋 Súmula do Jogo</div>
                 <button onClick={() => setModalJogo(null)} style={{ background: "none", border: "none", color: "#6b7db3", fontSize: 20, cursor: "pointer" }}>✕</button>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
@@ -1126,8 +1187,15 @@ export default function App() {
                     style={{ width: 60, textAlign: "center", fontSize: 28, fontWeight: 800, background: "#1a1f3a", border: "2px solid #1e2d5a", borderRadius: 8, color: "#FFD700", padding: "8px 0" }} />
                 </div>
               </div>
+              <button
+                onClick={() => setPlacar(contarGolsPorTime(golsPartida, modalJogo.casa, modalJogo.fora))}
+                style={{ ...S.btn, background: "#1e2d5a", color: "#FFD700", marginBottom: 16 }}
+              >
+                Recalcular placar pelos gols
+              </button>
+
               <div style={{ background: "#0d1228", borderRadius: 10, padding: 14, marginBottom: 16 }}>
-                <div style={{ fontWeight: 700, marginBottom: 12, fontSize: 13, color: "#FFD700" }}>⚽ Registrar Gol</div>
+                <div style={{ fontWeight: 700, marginBottom: 12, fontSize: 13, color: "#FFD700" }}>⚽ Lances da Súmula</div>
                 <select value={formGol.jogador} onChange={e => setFormGol(f => ({ ...f, jogador: e.target.value }))} style={S.select}>
                   <option value="">Quem fez o gol?</option>
                   {todosJogadores.map(j => <option key={j.nome} value={j.nome}>{j.nome} ({TIMES.find(t => t.id === j.time)?.nome})</option>)}
@@ -1136,18 +1204,21 @@ export default function App() {
                   <option value="">Assistência? (opcional)</option>
                   {todosJogadores.filter(j => j.nome !== formGol.jogador).map(j => <option key={j.nome} value={j.nome}>{j.nome}</option>)}
                 </select>
-                <button onClick={salvarGol} style={S.btn}>+ Adicionar Gol</button>
+                <button onClick={salvarGol} style={S.btn}>+ Adicionar Lance</button>
               </div>
               {golsPartida.length > 0 && (
                 <div style={{ marginBottom: 16 }}>
-                  <div style={{ fontWeight: 600, fontSize: 12, color: "#6b7db3", marginBottom: 8 }}>GOLS DA PARTIDA</div>
+                  <div style={{ fontWeight: 600, fontSize: 12, color: "#6b7db3", marginBottom: 8 }}>GOLS E ASSISTÊNCIAS</div>
                   {golsPartida.map((g, i) => {
                     const t = TIMES.find(t => t.id === g.time)
                     return (
                       <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid #1e2d5a", fontSize: 13 }}>
-                        <span>⚽</span><span style={{ fontWeight: 600 }}>{g.jogador}</span>
-                        <span style={{ fontSize: 11, color: t?.cor }}>{t?.nome}</span>
-                        <button onClick={() => setGolsPartida(prev => prev.filter((_, idx) => idx !== i))}
+                        <span>⚽</span>
+                        <div style={{ flex: 1 }}>
+                          <div><span style={{ fontWeight: 600 }}>{g.jogador}</span> <span style={{ fontSize: 11, color: t?.cor }}>{t?.nome}</span></div>
+                          {g.assistencia && <div style={{ fontSize: 11, color: "#6CABDD" }}>Assistência: {g.assistencia}</div>}
+                        </div>
+                        <button onClick={() => removerGol(i)}
                           style={{ marginLeft: "auto", background: "none", border: "none", color: "#f44336", cursor: "pointer", fontSize: 16 }}>✕</button>
                       </div>
                     )
@@ -1155,13 +1226,23 @@ export default function App() {
                 </div>
               )}
               <div style={{ marginBottom: 20 }}>
+                <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13, color: "#6CABDD" }}>📝 Observações da Súmula</div>
+                <textarea
+                  placeholder="W.O., cartões, atraso, ocorrência ou observação da partida"
+                  value={sumulaObservacoes}
+                  onChange={e => setSumulaObservacoes(e.target.value)}
+                  rows={3}
+                  style={{ ...S.select, resize: "vertical", minHeight: 78 }}
+                />
+              </div>
+              <div style={{ marginBottom: 20 }}>
                 <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13, color: "#c084fc" }}>🌟 MVP da Partida</div>
                 <select value={mvpSelecionado} onChange={e => setMvpSelecionado(e.target.value)} style={S.select}>
                   <option value="">Selecionar MVP</option>
                   {todosJogadores.map(j => <option key={j.nome} value={j.nome}>{j.nome} ({TIMES.find(t => t.id === j.time)?.nome})</option>)}
                 </select>
               </div>
-              <button onClick={salvarPartida} style={S.btnSalvar}>💾 Salvar Resultado</button>
+              <button onClick={salvarPartida} style={S.btnSalvar}>💾 Salvar Súmula e Atualizar Tudo</button>
             </div>
           </div>
         </div>
