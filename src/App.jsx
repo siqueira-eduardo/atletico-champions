@@ -14,7 +14,9 @@ export default function App() {
   const [assistencias, setAssistencias] = useState({})
   const [mvps, setMvps] = useState({})
   const [sumulas, setSumulas] = useState({})
+  const [votacoes, setVotacoes] = useState({})
   const [modalJogo, setModalJogo] = useState(null)
+  const [modalVotacao, setModalVotacao] = useState(null)
   const [formGol, setFormGol] = useState({ jogador: "", assistencia: "" })
   const [golsPartida, setGolsPartida] = useState([])
   const [placar, setPlacar] = useState({ casa: "", fora: "" })
@@ -32,6 +34,9 @@ export default function App() {
   const [adminEmail, setAdminEmail] = useState("")
   const [senhaInput, setSenhaInput] = useState("")
   const [authError, setAuthError] = useState("")
+  const [cpfVotacao, setCpfVotacao] = useState("")
+  const [notasVotacao, setNotasVotacao] = useState({})
+  const [votoErro, setVotoErro] = useState("")
   const [loading, setLoading] = useState(true)
   const [fotos, setFotos] = useState({})
   const [novaFotoUrl, setNovaFotoUrl] = useState("")
@@ -46,6 +51,7 @@ export default function App() {
       { key: 'assistencias', setter: setAssistencias },
       { key: 'mvps', setter: setMvps },
       { key: 'sumulas', setter: setSumulas },
+      { key: 'votacoes', setter: setVotacoes },
       { key: 'fotos', setter: setFotos },
     ]
     const unsubs = refs.map(({ key, setter }) =>
@@ -80,7 +86,28 @@ export default function App() {
   }, [])
 
   const getTimeByNome = (nome) => TIMES.find(t => t.nome === nome)
-  const getTimeDoJogador = (nome) => JOGADORES.find(j => j.nome === nome)?.time
+  const getTimeDoJogador = (nome, rodada = null) => {
+    const jogador = JOGADORES.find(j => j.nome === nome)
+    if (!jogador) return ""
+    if (rodada && jogador.aPartirRodada && rodada < jogador.aPartirRodada) {
+      return jogador.timeAnterior ?? jogador.time ?? ""
+    }
+    return jogador.time ?? ""
+  }
+  const getJogadoresDoTimeNaRodada = (timeNome, rodada, incluirGoleiro = true) => {
+    const time = getTimeByNome(timeNome)
+    if (!time) return []
+    const linha = JOGADORES.filter(j => !j.semTimeFixo && getTimeDoJogador(j.nome, rodada) === time.id)
+    const goleiro = JOGADORES.find(j => j.nome === GOLEIROS[time.id])
+    return incluirGoleiro && goleiro && !linha.some(j => j.nome === goleiro.nome) ? [...linha, goleiro] : linha
+  }
+  const getJogadoresDaPartida = (casa, fora, rodada) => {
+    const jogadores = [
+      ...getJogadoresDoTimeNaRodada(casa, rodada),
+      ...getJogadoresDoTimeNaRodada(fora, rodada),
+    ]
+    return jogadores.filter((j, idx, arr) => arr.findIndex(item => item.nome === j.nome) === idx)
+  }
   const contarGolsPorTime = (lista, casaNome, foraNome) => {
     const casaId = getTimeByNome(casaNome)?.id
     const foraId = getTimeByNome(foraNome)?.id
@@ -153,6 +180,40 @@ export default function App() {
     return Object.entries(mv).map(([nome, d]) => ({ nome, ...d })).sort((a, b) => b.count - a.count)
   }
 
+  const calcMediasVotacao = (key) => {
+    const votos = Object.values(votacoes[key]?.votos || {})
+    const notas = {}
+    votos.forEach(voto => {
+      Object.entries(voto.notas || {}).forEach(([nome, nota]) => {
+        const valor = Number(nota)
+        if (!Number.isFinite(valor)) return
+        if (!notas[nome]) notas[nome] = { total: 0, votos: 0 }
+        notas[nome].total += valor
+        notas[nome].votos += 1
+      })
+    })
+    return Object.entries(notas)
+      .map(([nome, d]) => ({ nome, media: d.total / d.votos, votos: d.votos }))
+      .sort((a, b) => b.media - a.media || b.votos - a.votos)
+  }
+
+  const calcNotasGerais = () => {
+    const notas = {}
+    Object.keys(votacoes).forEach(key => {
+      calcMediasVotacao(key).forEach(n => {
+        if (!notas[n.nome]) notas[n.nome] = { total: 0, jogos: 0, votos: 0 }
+        notas[n.nome].total += n.media
+        notas[n.nome].jogos += 1
+        notas[n.nome].votos += n.votos
+      })
+    })
+    return Object.entries(notas)
+      .map(([nome, d]) => ({ nome, media: d.total / d.jogos, jogos: d.jogos, votos: d.votos }))
+      .sort((a, b) => b.media - a.media || b.votos - a.votos)
+  }
+
+  const getMvpAutomatico = (key) => calcMediasVotacao(key)[0]?.nome || ""
+
   const abrirModal = (rodada, jogoIdx, casa, fora) => {
     if (!isAdmin) return
     const key = `${rodada}-${jogoIdx}`
@@ -163,7 +224,7 @@ export default function App() {
     const golsComAssistencias = golsSalvos.map((g, i) => ({
       ...g,
       assistencia: g.assistencia || assistenciasSalvas[i]?.jogador || "",
-      assistenciaTime: g.assistenciaTime || assistenciasSalvas[i]?.time || getTimeDoJogador(assistenciasSalvas[i]?.jogador) || "",
+      assistenciaTime: g.assistenciaTime || assistenciasSalvas[i]?.time || getTimeDoJogador(assistenciasSalvas[i]?.jogador, rodada) || "",
     }))
     setModalJogo({ key, rodada, jogoIdx, casa, fora })
     setPlacar({ casa: r.placar?.casa || "", fora: r.placar?.fora || "" })
@@ -179,13 +240,11 @@ export default function App() {
 
   const salvarGol = () => {
     if (!formGol.jogador || !modalJogo) return
-    const jog = JOGADORES.find(j => j.nome === formGol.jogador)
-    const assJog = JOGADORES.find(j => j.nome === formGol.assistencia)
     const novoGol = {
       jogador: formGol.jogador,
-      time: jog?.time || "",
+      time: getTimeDoJogador(formGol.jogador, modalJogo.rodada),
       assistencia: formGol.assistencia || "",
-      assistenciaTime: formGol.assistencia ? (assJog?.time || "") : "",
+      assistenciaTime: formGol.assistencia ? getTimeDoJogador(formGol.assistencia, modalJogo.rodada) : "",
     }
     const novosGols = [...golsPartida, novoGol]
     setGolsPartida(novosGols)
@@ -202,10 +261,9 @@ export default function App() {
 
   const adicionarCartao = () => {
     if (!formCartao.jogador) return
-    const jog = JOGADORES.find(j => j.nome === formCartao.jogador)
     setCartoesPartida(prev => [
       ...prev,
-      { jogador: formCartao.jogador, time: jog?.time || "", tipo: formCartao.tipo }
+      { jogador: formCartao.jogador, time: getTimeDoJogador(formCartao.jogador, modalJogo?.rodada), tipo: formCartao.tipo }
     ])
     setFormCartao({ jogador: "", tipo: "amarelo" })
   }
@@ -225,7 +283,7 @@ export default function App() {
     setOcorrenciasPartida(prev => prev.filter((_, idx) => idx !== idxOcorrencia))
   }
 
-  const validarSumula = (placarFinal, golsNormalizados) => {
+  const validarSumula = (placarFinal, golsNormalizados, mvpFinal) => {
     const avisos = []
     const placarPorGols = contarGolsPorTime(golsNormalizados, modalJogo.casa, modalJogo.fora)
     const placarDiferente =
@@ -235,7 +293,7 @@ export default function App() {
     if (placarDiferente) {
       avisos.push(`O placar informado (${placarFinal.casa} x ${placarFinal.fora}) não bate com os gols lançados (${placarPorGols.casa} x ${placarPorGols.fora}).`)
     }
-    if (!mvpSelecionado) avisos.push("Nenhum MVP foi selecionado.")
+    if (!mvpFinal) avisos.push("Nenhum MVP foi selecionado.")
     if (golsNormalizados.some(g => g.assistencia && g.assistencia === g.jogador)) {
       avisos.push("Existe gol com assistência do próprio autor.")
     }
@@ -262,21 +320,22 @@ export default function App() {
     const key = modalJogo.key
     const golsNormalizados = golsPartida.map(g => ({
       jogador: g.jogador,
-      time: g.time || getTimeDoJogador(g.jogador) || "",
+      time: g.time || getTimeDoJogador(g.jogador, modalJogo.rodada) || "",
       assistencia: g.assistencia || "",
-      assistenciaTime: g.assistencia ? (g.assistenciaTime || getTimeDoJogador(g.assistencia) || "") : "",
+      assistenciaTime: g.assistencia ? (g.assistenciaTime || getTimeDoJogador(g.assistencia, modalJogo.rodada) || "") : "",
     }))
     const assistenciasPartida = golsNormalizados
       .filter(g => g.assistencia)
       .map(g => ({ jogador: g.assistencia, time: g.assistenciaTime }))
     const cartoesNormalizados = cartoesPartida.map(c => ({
       jogador: c.jogador,
-      time: c.time || getTimeDoJogador(c.jogador) || "",
+      time: c.time || getTimeDoJogador(c.jogador, modalJogo.rodada) || "",
       tipo: c.tipo,
     }))
     const ocorrenciasNormalizadas = ocorrenciasPartida.map(o => String(o).trim()).filter(Boolean)
     const placarFinal = { casa: String(placar.casa || 0), fora: String(placar.fora || 0) }
-    const avisos = validarSumula(placarFinal, golsNormalizados)
+    const mvpFinal = mvpSelecionado || getMvpAutomatico(key) || ""
+    const avisos = validarSumula(placarFinal, golsNormalizados, mvpFinal)
 
     if (avisos.length > 0 && !window.confirm(`Conferir súmula:\n\n${avisos.join("\n")}\n\nDeseja salvar mesmo assim?`)) {
       return
@@ -293,7 +352,7 @@ export default function App() {
       assistencias: assistenciasPartida,
       cartoes: cartoesNormalizados,
       ocorrencias: ocorrenciasNormalizadas,
-      mvp: mvpSelecionado || "",
+      mvp: mvpFinal,
       observacoes: sumulaObservacoes.trim(),
       atualizadaEm: new Date().toISOString(),
       atualizadaPor: authUser?.email || (adminModo === "pin" ? "PIN local" : "admin"),
@@ -303,7 +362,7 @@ export default function App() {
     await set(ref(db, `resultados/${key}`), resultado)
     await set(ref(db, `gols/${key}`), golsNormalizados)
     await set(ref(db, `assistencias/${key}`), assistenciasPartida)
-    await set(ref(db, `mvps/${key}`), mvpSelecionado)
+    await set(ref(db, `mvps/${key}`), mvpFinal)
     await set(ref(db, `sumulas/${key}`), sumula)
     setModalJogo(null)
   }
@@ -475,6 +534,7 @@ export default function App() {
   const artilheiros = calcArtilheiros()
   const assLista = calcAssistencias()
   const mvpLista = calcMvps()
+  const notasGerais = calcNotasGerais()
 
   // ── última rodada jogada (para destaque "Jogador da Semana") ──
   const getUltimaRodadaInfo = () => {
@@ -536,9 +596,75 @@ export default function App() {
     }
   }
 
-  const jogadoresCasa = modalJogo ? JOGADORES.filter(j => { const t = getTimeByNome(modalJogo.casa); return t && j.time === t.id }) : []
-  const jogadoresFora = modalJogo ? JOGADORES.filter(j => { const t = getTimeByNome(modalJogo.fora); return t && j.time === t.id }) : []
-  const todosJogadores = [...jogadoresCasa, ...jogadoresFora]
+  const normalizarCPF = (valor) => valor.replace(/\D/g, "")
+
+  const gerarChaveCPF = async (cpf) => {
+    if (window.crypto?.subtle) {
+      const bytes = new TextEncoder().encode(cpf)
+      const hash = await window.crypto.subtle.digest("SHA-256", bytes)
+      return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, "0")).join("")
+    }
+    return btoa(cpf).replace(/[+/=]/g, "")
+  }
+
+  const abrirModalVotacao = (key, rodada, jogoIdx, casa, fora) => {
+    const jogadores = getJogadoresDaPartida(casa, fora, rodada)
+    setModalVotacao({ key, rodada, jogoIdx, casa, fora, jogadores })
+    setCpfVotacao("")
+    setNotasVotacao(Object.fromEntries(jogadores.map(j => [j.nome, ""])))
+    setVotoErro("")
+  }
+
+  const salvarVoto = async () => {
+    if (!modalVotacao) return
+    const cpf = normalizarCPF(cpfVotacao)
+    if (cpf.length !== 11) {
+      setVotoErro("Informe um CPF com 11 digitos.")
+      return
+    }
+    const chaveCPF = await gerarChaveCPF(cpf)
+    if (votacoes[modalVotacao.key]?.votos?.[chaveCPF]) {
+      setVotoErro("Este CPF ja votou nesse jogo.")
+      return
+    }
+    const notas = {}
+    modalVotacao.jogadores.forEach(j => {
+      const valor = Number(notasVotacao[j.nome])
+      if (Number.isFinite(valor) && valor >= 0 && valor <= 10) notas[j.nome] = valor
+    })
+    if (Object.keys(notas).length === 0) {
+      setVotoErro("De pelo menos uma nota de 0 a 10.")
+      return
+    }
+    await set(ref(db, `votacoes/${modalVotacao.key}/votos/${chaveCPF}`), {
+      notas,
+      criadoEm: new Date().toISOString(),
+    })
+    setModalVotacao(null)
+  }
+
+  const definirVotacao = async (key, aberta, jogo, rodada, jogoIdx) => {
+    await set(ref(db, `votacoes/${key}/aberta`), aberta)
+    await set(ref(db, `votacoes/${key}/rodada`), rodada)
+    await set(ref(db, `votacoes/${key}/jogoIdx`), jogoIdx)
+    await set(ref(db, `votacoes/${key}/casa`), jogo[0])
+    await set(ref(db, `votacoes/${key}/fora`), jogo[1])
+  }
+
+  const compartilharVotacao = (key, jogo) => {
+    const texto = `Votacao aberta - ${jogo[0]} x ${jogo[1]}\nDe sua nota de 0 a 10 e ajude a escolher o MVP:\n${window.location.href}`
+    if (navigator.share) {
+      navigator.share({ text: texto }).catch(() => {})
+    } else {
+      navigator.clipboard.writeText(texto)
+      alert("Link da votacao copiado para enviar no WhatsApp.")
+    }
+  }
+
+  const jogadoresCasa = modalJogo ? getJogadoresDoTimeNaRodada(modalJogo.casa, modalJogo.rodada) : []
+  const jogadoresFora = modalJogo ? getJogadoresDoTimeNaRodada(modalJogo.fora, modalJogo.rodada) : []
+  const todosJogadores = modalJogo ? getJogadoresDaPartida(modalJogo.casa, modalJogo.fora, modalJogo.rodada) : []
+  const mvpAutomaticoModal = modalJogo ? getMvpAutomatico(modalJogo.key) : ""
 
   const S = {
     page: { minHeight: "100vh", background: "#0a0e1a", color: "#fff", fontFamily: "'Segoe UI', sans-serif" },
@@ -865,6 +991,7 @@ export default function App() {
                 {r.jogos.map((jogo, ji) => {
                   const key = `${r.rodada}-${ji}`
                   const res = resultados[key]
+                  const votacao = votacoes[key] || {}
                   const tCasa = getTimeByNome(jogo[0])
                   const tFora = getTimeByNome(jogo[1])
                   const horario = jogo[2]
@@ -887,6 +1014,23 @@ export default function App() {
                           <div style={{ fontWeight: 700, fontSize: 13 }}>{jogo[1]}</div>
                           <div style={{ fontSize: 10, color: tFora?.cor }}>{tFora?.capitao}</div>
                         </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                        {votacao.aberta && (
+                          <button onClick={(e) => { e.stopPropagation(); abrirModalVotacao(key, r.rodada, ji, jogo[0], jogo[1]) }}
+                            style={{ background: "#22c55e22", border: "1px solid #22c55e66", borderRadius: 6, padding: "6px 8px", cursor: "pointer", color: "#22c55e", fontSize: 12, fontWeight: 800 }}
+                          >Votar</button>
+                        )}
+                        {res && (
+                          <button onClick={(e) => { e.stopPropagation(); compartilharVotacao(key, jogo) }}
+                            style={{ background: "none", border: "1px solid #1e2d5a", borderRadius: 6, padding: "6px 8px", cursor: "pointer", color: "#6b7db3", fontSize: 12, fontWeight: 700 }}
+                          >Link</button>
+                        )}
+                        {isAdmin && res && (
+                          <button onClick={(e) => { e.stopPropagation(); definirVotacao(key, !votacao.aberta, jogo, r.rodada, ji) }}
+                            style={{ background: votacao.aberta ? "#f4433622" : "#1a1f3a", border: "1px solid #1e2d5a", borderRadius: 6, padding: "6px 8px", cursor: "pointer", color: votacao.aberta ? "#f44336" : "#FFD700", fontSize: 11, fontWeight: 800 }}
+                          >{votacao.aberta ? "Fechar" : "Abrir"}</button>
+                        )}
                       </div>
                       {res && (
                         <button onClick={(e) => { e.stopPropagation(); compartilharResultado(key, jogo) }}
@@ -917,6 +1061,7 @@ export default function App() {
             {TIMES.filter(t => t.id === timeSelecionado).map(time => {
               const jogadoresTime = JOGADORES.filter(j => j.time === timeSelecionado)
               const goleiro = GOLEIROS[timeSelecionado]
+              const goleiroJogador = JOGADORES.find(j => j.nome === goleiro)
               const incompleto = TIMES_INCOMPLETOS[timeSelecionado]
               const artMap = calcArtilheiros()
               const assMap = calcAssistencias()
@@ -939,7 +1084,8 @@ export default function App() {
                     )}
                   </div>
                   <div style={{ fontSize: 10, color: "#6b7db3", letterSpacing: 2, marginBottom: 6 }}>GOLEIRO</div>
-                  <div style={{ ...S.card, display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+                  <div onClick={() => goleiroJogador && setJogadorSelecionado(goleiroJogador)}
+                    style={{ ...S.card, display: "flex", alignItems: "center", gap: 12, marginBottom: 16, cursor: goleiroJogador ? "pointer" : "default" }}>
                     <div style={{ fontSize: 20 }}>🧤</div>
                     <div>
                       <div style={{ fontWeight: 700 }}>{goleiro}</div>
@@ -963,6 +1109,12 @@ export default function App() {
                             <span style={{ fontWeight: 700 }}>{j.nome}</span>
                             {j.funcao !== "Jogador" && (
                               <span style={{ fontSize: 10, color: funcaoCor, border: `1px solid ${funcaoCor}55`, borderRadius: 4, padding: "1px 5px" }}>{j.funcao}</span>
+                            )}
+                            {j.status && (
+                              <span style={{ fontSize: 10, color: "#f44336", border: "1px solid #f4433655", borderRadius: 4, padding: "1px 5px" }}>{j.status}</span>
+                            )}
+                            {j.aPartirRodada && (
+                              <span style={{ fontSize: 10, color: "#6CABDD", border: "1px solid #6CABDD55", borderRadius: 4, padding: "1px 5px" }}>R{j.aPartirRodada}</span>
                             )}
                           </div>
                         </div>
@@ -1257,13 +1409,14 @@ export default function App() {
       {jogadorSelecionado && (() => {
         const j = jogadorSelecionado
         const time = TIMES.find(t => t.id === j.time)
-        const corTime = time?.cor === "#FFFFFF" || time?.cor === "#000000" ? "#8899cc" : time?.cor
+        const corTime = !time || time?.cor === "#FFFFFF" || time?.cor === "#000000" ? "#8899cc" : time?.cor
         const artMap = calcArtilheiros()
         const assMap = calcAssistencias()
         const mvpMap = calcMvps()
         const golsTotal = artMap.find(a => a.nome === j.nome)?.gols || 0
         const assistsTotal = assMap.find(a => a.nome === j.nome)?.assists || 0
         const mvpsTotal = mvpMap.find(m => m.nome === j.nome)?.count || 0
+        const notaMedia = notasGerais.find(n => n.nome === j.nome)?.media
 
         // jogos disputados (partidas onde o time jogou)
         const jogosDoTime = Object.values(resultados).filter(r =>
@@ -1299,7 +1452,7 @@ export default function App() {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
                   <div>
                     <div style={{ fontSize: 22, fontWeight: 800, color: "#fff" }}>{j.nome}</div>
-                    <div style={{ fontSize: 12, color: corTime, marginTop: 2 }}>{time?.nome}</div>
+                    <div style={{ fontSize: 12, color: corTime, marginTop: 2 }}>{time?.nome || "Goleiro sem time fixo"}</div>
                     {j.funcao !== "Jogador" && (
                       <div style={{ fontSize: 11, color: "#FFD700", marginTop: 4, border: "1px solid #FFD70055", borderRadius: 4, padding: "2px 7px", display: "inline-block" }}>{j.funcao}</div>
                     )}
@@ -1309,12 +1462,13 @@ export default function App() {
                 </div>
 
                 {/* Stats principais */}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8, marginBottom: 20 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8, marginBottom: 20 }}>
                   {[
                     { label: "Gols", value: golsTotal, icon: "⚽", cor: "#FFD700" },
                     { label: "Assists", value: assistsTotal, icon: "🎯", cor: "#6CABDD" },
                     { label: "MVPs", value: mvpsTotal, icon: "🌟", cor: "#c084fc" },
                     { label: "Jogos", value: totalJogos, icon: "📅", cor: "#4caf50" },
+                    { label: "Nota", value: notaMedia ? notaMedia.toFixed(1) : "-", icon: "10", cor: "#22c55e" },
                   ].map(s => (
                     <div key={s.label} style={{ background: "#0d1228", borderRadius: 10, padding: "12px 8px", textAlign: "center" }}>
                       <div style={{ fontSize: 18 }}>{s.icon}</div>
@@ -1384,6 +1538,56 @@ export default function App() {
           </div>
         )
       })()}
+
+      {/* MODAL VOTACAO */}
+      {modalVotacao && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.9)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 220, padding: 16 }}>
+          <div style={{ background: "#111827", border: "1px solid #22c55e55", borderRadius: 16, width: "100%", maxWidth: 440, maxHeight: "90vh", overflowY: "auto", padding: 20 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+              <div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: "#22c55e" }}>Votacao do Jogo</div>
+                <div style={{ fontSize: 12, color: "#8899cc", marginTop: 4 }}>{modalVotacao.casa} x {modalVotacao.fora}</div>
+              </div>
+              <button onClick={() => setModalVotacao(null)}
+                style={{ background: "none", border: "none", color: "#6b7db3", fontSize: 22, cursor: "pointer" }}>x</button>
+            </div>
+
+            <input
+              placeholder="CPF para controlar voto unico"
+              value={cpfVotacao}
+              onChange={e => setCpfVotacao(e.target.value)}
+              style={S.select}
+            />
+
+            <div style={{ fontSize: 11, color: "#6b7db3", marginBottom: 10 }}>
+              De notas de 0 a 10. A maior media vira o MVP automatico, mas o admin ainda pode trocar na sumula.
+            </div>
+
+            {modalVotacao.jogadores.map(j => (
+              <div key={j.nome} style={{ display: "grid", gridTemplateColumns: "1fr 82px", gap: 10, alignItems: "center", padding: "8px 0", borderBottom: "1px solid #1e2d5a" }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>{j.nome}</div>
+                  <div style={{ fontSize: 10, color: "#6b7db3" }}>{TIMES.find(t => t.id === getTimeDoJogador(j.nome, modalVotacao.rodada))?.nome || "Goleiro"}</div>
+                </div>
+                <input
+                  type="number"
+                  min="0"
+                  max="10"
+                  step="0.5"
+                  value={notasVotacao[j.nome] ?? ""}
+                  onChange={e => setNotasVotacao(prev => ({ ...prev, [j.nome]: e.target.value }))}
+                  style={{ ...S.select, marginBottom: 0, textAlign: "center" }}
+                />
+              </div>
+            ))}
+
+            {votoErro && <div style={{ color: "#f44336", fontSize: 12, marginTop: 12 }}>{votoErro}</div>}
+            <button onClick={salvarVoto} style={{ ...S.btnSalvar, marginTop: 16, background: "linear-gradient(135deg, #22c55e, #86efac)" }}>
+              Enviar Voto
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* MODAL ADMIN */}
       {modalJogo && isAdmin && (
@@ -1513,9 +1717,18 @@ export default function App() {
               </div>
               <div style={{ marginBottom: 20 }}>
                 <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13, color: "#c084fc" }}>🌟 MVP da Partida</div>
+                {mvpAutomaticoModal && (
+                  <div style={{ background: "#c084fc18", border: "1px solid #c084fc55", borderRadius: 8, padding: 10, marginBottom: 8, fontSize: 12, color: "#d8b4fe", display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ flex: 1 }}>MVP automatico pela votacao: <strong>{mvpAutomaticoModal}</strong></span>
+                    <button onClick={() => setMvpSelecionado(mvpAutomaticoModal)}
+                      style={{ background: "#c084fc", border: "none", borderRadius: 6, padding: "5px 8px", color: "#0a0e1a", fontWeight: 800, cursor: "pointer", fontSize: 11 }}>
+                      Usar
+                    </button>
+                  </div>
+                )}
                 <select value={mvpSelecionado} onChange={e => setMvpSelecionado(e.target.value)} style={S.select}>
                   <option value="">Selecionar MVP</option>
-                  {todosJogadores.map(j => <option key={j.nome} value={j.nome}>{j.nome} ({TIMES.find(t => t.id === j.time)?.nome})</option>)}
+                  {todosJogadores.map(j => <option key={j.nome} value={j.nome}>{j.nome} ({TIMES.find(t => t.id === getTimeDoJogador(j.nome, modalJogo.rodada))?.nome || "Goleiro"})</option>)}
                 </select>
               </div>
               <button onClick={salvarPartida} style={S.btnSalvar}>💾 Salvar Súmula e Atualizar Tudo</button>

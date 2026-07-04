@@ -1,9 +1,9 @@
 export const TIMES = [
   { id: 1, nome: "Chelsea", capitao: "Eduardo Siqueira", cor: "#034694", corSecundaria: "#DBA111" },
   { id: 2, nome: "Juventus", capitao: "Enrique Magalhães", cor: "#333333", corSecundaria: "#FFFFFF" },
-  { id: 3, nome: "Real Madrid", capitao: "G. Baia", cor: "#00529F", corSecundaria: "#FFD700" },
-  { id: 4, nome: "Milan", capitao: "Riquelme Batista", cor: "#FB090B", corSecundaria: "#000000" },
-  { id: 5, nome: "Barcelona", capitao: "Cosmim", cor: "#A50044", corSecundaria: "#004D98" },
+  { id: 3, nome: "Real Madrid", capitao: "Lukas Honorato", cor: "#00529F", corSecundaria: "#FFD700" },
+  { id: 4, nome: "Milan", capitao: "Kimzeira", cor: "#FB090B", corSecundaria: "#000000" },
+  { id: 5, nome: "Barcelona", capitao: "Bruno Elves", cor: "#A50044", corSecundaria: "#004D98" },
   { id: 6, nome: "Roma", capitao: "Gleyck Isídio", cor: "#8E1F2F", corSecundaria: "#F0BC42" },
 ]
 
@@ -14,7 +14,7 @@ export const JOGADORES = [
   { nome: "Wesley Victor", time: 1, funcao: "Jogador", posicao: null },
   { nome: "Vitor Ratinho", time: 1, funcao: "Jogador", posicao: null },
   { nome: "G. Queiroz", time: 1, funcao: "Jogador", posicao: null },
-  { nome: "Waldin", time: 1, funcao: "Jogador", posicao: null },
+  { nome: "Alex Vinícius", time: 1, funcao: "Jogador", posicao: null },
   { nome: "Rômulo", time: 1, funcao: "Jogador", posicao: null },
 
   // Juventus ✅ (7 linha + goleiro)
@@ -27,48 +27,53 @@ export const JOGADORES = [
   { nome: "Dorgi", time: 2, funcao: "Jogador", posicao: null },
 
   // Real Madrid ✅ (7 linha + goleiro)
-  { nome: "G. Baia", time: 3, funcao: "Capitão", posicao: null },
+  { nome: "G. Baia", time: 3, funcao: "Jogador", posicao: null },
   { nome: "Bielzinho", time: 3, funcao: "Jogador", posicao: null },
   { nome: "Gugu", time: 3, funcao: "Jogador", posicao: null },
   { nome: "Jean Telles", time: 3, funcao: "Jogador", posicao: null },
-  { nome: "Lukas Honorato", time: 3, funcao: "Jogador", posicao: null },
-  { nome: "Boquinha", time: 3, funcao: "Jogador", posicao: null },
+  { nome: "Lukas Honorato", time: 3, funcao: "Capitão", posicao: null },
+  { nome: "Waldin", time: 3, funcao: "Jogador", posicao: null },
   { nome: "David", time: 3, funcao: "Jogador", posicao: null },
 
   // Milan ✅ (7 linha + goleiro)
-  { nome: "Riquelme Batista", time: 4, funcao: "Capitão", posicao: null },
-  { nome: "Kimzeira", time: 4, funcao: "Jogador", posicao: null },
-  { nome: "L. Magalhães", time: 4, funcao: "Jogador", posicao: null },
+  { nome: "Riquelme Batista", time: 4, funcao: "Jogador", posicao: null },
+  { nome: "Kimzeira", time: 4, funcao: "Capitão", posicao: null },
+  { nome: "L. Magalhães", time: 4, funcao: "Jogador", posicao: null, status: "Lesionado" },
   { nome: "Jair", time: 4, funcao: "Jogador", posicao: null },
   { nome: "Maguilinha", time: 4, funcao: "Jogador", posicao: null },
   { nome: "Alerrandro", time: 4, funcao: "Jogador", posicao: null },
   { nome: "Dedé Isídio", time: 4, funcao: "Jogador", posicao: null },
 
   // Barcelona ✅ (7 linha + goleiro)
-  { nome: "Bruno Elves", time: 5, funcao: "Jogador", posicao: null },
+  { nome: "Bruno Elves", time: 5, funcao: "Capitão", posicao: null },
   { nome: "Fagner Forasteiro", time: 5, funcao: "Jogador", posicao: null },
   { nome: "Chico", time: 5, funcao: "Jogador", posicao: null },
   { nome: "Panchuca", time: 5, funcao: "Jogador", posicao: null },
-  { nome: "Cosmim", time: 5, funcao: "Capitão", posicao: null },
   { nome: "Renato", time: 5, funcao: "Jogador", posicao: null },
   { nome: "Japa", time: 5, funcao: "Jogador", posicao: null },
 
   // Roma ✅ (7 linha + goleiro)
   { nome: "Gleyck Isídio", time: 6, funcao: "Capitão", posicao: null },
-  { nome: "Henrique Neguin", time: 6, funcao: "Jogador", posicao: null },
+  { nome: "Henrique L", time: 6, funcao: "Jogador", posicao: null },
   { nome: "G. Carequinha", time: 6, funcao: "Jogador", posicao: null },
   { nome: "Wagner", time: 6, funcao: "Jogador", posicao: null },
   { nome: "Leonardo", time: 6, funcao: "Jogador", posicao: null },
-  { nome: "Dandao", time: 6, funcao: "Jogador", posicao: null },
+  { nome: "Boquinha", time: 6, funcao: "Jogador", posicao: null, timeAnterior: 3, aPartirRodada: 2 },
   { nome: "José", time: 6, funcao: "Jogador", posicao: null },
+
+  // Goleiros sem time fixo
+  { nome: "F. Levino", time: null, funcao: "Goleiro", posicao: "Goleiro", semTimeFixo: true },
+  { nome: "Victor Coutinho", time: null, funcao: "Goleiro", posicao: "Goleiro", semTimeFixo: true },
+  { nome: "Eugênio", time: null, funcao: "Goleiro", posicao: "Goleiro", semTimeFixo: true },
+  { nome: "Vini", time: null, funcao: "Goleiro", posicao: "Goleiro", semTimeFixo: true },
 ]
 
 export const GOLEIROS = {
-  1: "F. Cigano",
-  2: "F. Cigano",
+  1: "F. Levino",
+  2: "F. Levino",
   3: "Victor Coutinho",
   4: "Eugênio",
-  5: "F. Cigano",
+  5: "F. Levino",
   6: "Vini",
 }
 
