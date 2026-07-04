@@ -1,6 +1,65 @@
 {
   "rules": {
     ".read": true,
-    ".write": "auth != null"
+    "resultados": { ".write": "auth != null" },
+    "gols": { ".write": "auth != null" },
+    "assistencias": { ".write": "auth != null" },
+    "mvps": { ".write": "auth != null" },
+    "sumulas": { ".write": "auth != null" },
+    "historicoSumulas": { ".write": "auth != null" },
+    "fotos": { ".write": "auth != null" },
+    "votacoes": {
+      "$jogo": {
+        "aberta": {
+          ".write": "auth != null",
+          ".validate": "newData.isBoolean()"
+        },
+        "rodada": {
+          ".write": "auth != null",
+          ".validate": "newData.isNumber()"
+        },
+        "jogoIdx": {
+          ".write": "auth != null",
+          ".validate": "newData.isNumber()"
+        },
+        "casa": {
+          ".write": "auth != null",
+          ".validate": "newData.isString()"
+        },
+        "fora": {
+          ".write": "auth != null",
+          ".validate": "newData.isString()"
+        },
+        "votos": {
+          "$cpfHash": {
+            ".write": "auth != null || (!data.exists() && root.child('votacoes').child($jogo).child('aberta').val() === true)",
+            ".validate": "newData.hasChildren(['notas', 'criadoEm'])",
+            "notas": {
+              "$idx": {
+                ".validate": "newData.hasChildren(['jogador', 'nota'])",
+                "jogador": {
+                  ".validate": "newData.isString()"
+                },
+                "nota": {
+                  ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10"
+                },
+                "$other": {
+                  ".validate": false
+                }
+              }
+            },
+            "criadoEm": {
+              ".validate": "newData.isString()"
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
+        },
+        "$other": {
+          ".write": "auth != null"
+        }
+      }
+    }
   }
 }

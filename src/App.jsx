@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { ref, onValue, set, push } from 'firebase/database'
+import { ref, onValue, set, push, update, runTransaction } from 'firebase/database'
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth'
 import { auth, db } from './firebase'
 import { TIMES, JOGADORES, GOLEIROS, RODADAS, TABS, TIMES_INCOMPLETOS, REGRAS, MATA_MATA } from './data'
@@ -37,14 +37,22 @@ export default function App() {
   const [cpfVotacao, setCpfVotacao] = useState("")
   const [notasVotacao, setNotasVotacao] = useState({})
   const [votoErro, setVotoErro] = useState("")
+  const [votoLinkAberto, setVotoLinkAberto] = useState("")
   const [loading, setLoading] = useState(true)
   const [fotos, setFotos] = useState({})
   const [novaFotoUrl, setNovaFotoUrl] = useState("")
   const [novaFotoLegenda, setNovaFotoLegenda] = useState("")
   const [rodadaFotoSelecionada, setRodadaFotoSelecionada] = useState(1)
+  const [aviso, setAviso] = useState(null)
+
+  const mostrarAviso = (texto, tipo = "info") => {
+    setAviso({ texto, tipo })
+    window.setTimeout(() => setAviso(null), 4500)
+  }
 
   // ── carregar dados do Firebase em tempo real ──
   useEffect(() => {
+    const carregados = new Set()
     const refs = [
       { key: 'resultados', setter: setResultados },
       { key: 'gols', setter: setGols },
@@ -57,7 +65,11 @@ export default function App() {
     const unsubs = refs.map(({ key, setter }) =>
       onValue(ref(db, key), snap => {
         setter(snap.val() || {})
-        setLoading(false)
+        carregados.add(key)
+        if (carregados.size === refs.length) setLoading(false)
+      }, () => {
+        carregados.add(key)
+        if (carregados.size === refs.length) setLoading(false)
       })
     )
     return () => unsubs.forEach(u => u())
@@ -180,11 +192,21 @@ export default function App() {
     return Object.entries(mv).map(([nome, d]) => ({ nome, ...d })).sort((a, b) => b.count - a.count)
   }
 
+  const getNotasDoVoto = (voto) => {
+    const notas = voto?.notas
+    if (Array.isArray(notas)) {
+      return notas
+        .filter(n => n?.jogador)
+        .map(n => [n.jogador, n.nota])
+    }
+    return Object.entries(notas || {})
+  }
+
   const calcMediasVotacao = (key) => {
     const votos = Object.values(votacoes[key]?.votos || {})
     const notas = {}
     votos.forEach(voto => {
-      Object.entries(voto.notas || {}).forEach(([nome, nota]) => {
+      getNotasDoVoto(voto).forEach(([nome, nota]) => {
         const valor = Number(nota)
         if (!Number.isFinite(valor)) return
         if (!notas[nome]) notas[nome] = { total: 0, votos: 0 }
@@ -199,16 +221,20 @@ export default function App() {
 
   const calcNotasGerais = () => {
     const notas = {}
-    Object.keys(votacoes).forEach(key => {
-      calcMediasVotacao(key).forEach(n => {
-        if (!notas[n.nome]) notas[n.nome] = { total: 0, jogos: 0, votos: 0 }
-        notas[n.nome].total += n.media
-        notas[n.nome].jogos += 1
-        notas[n.nome].votos += n.votos
+    Object.entries(votacoes).forEach(([key, votacao]) => {
+      Object.values(votacao?.votos || {}).forEach(voto => {
+        getNotasDoVoto(voto).forEach(([nome, nota]) => {
+          const valor = Number(nota)
+          if (!Number.isFinite(valor)) return
+          if (!notas[nome]) notas[nome] = { total: 0, votos: 0, jogos: new Set() }
+          notas[nome].total += valor
+          notas[nome].votos += 1
+          notas[nome].jogos.add(key)
+        })
       })
     })
     return Object.entries(notas)
-      .map(([nome, d]) => ({ nome, media: d.total / d.jogos, jogos: d.jogos, votos: d.votos }))
+      .map(([nome, d]) => ({ nome, media: d.total / d.votos, jogos: d.jogos.size, votos: d.votos }))
       .sort((a, b) => b.media - a.media || b.votos - a.votos)
   }
 
@@ -358,13 +384,20 @@ export default function App() {
       atualizadaPor: authUser?.email || (adminModo === "pin" ? "PIN local" : "admin"),
     }
 
-    await salvarHistoricoSumula(key, sumulas[key] ? "edicao" : "criacao", sumulas[key])
-    await set(ref(db, `resultados/${key}`), resultado)
-    await set(ref(db, `gols/${key}`), golsNormalizados)
-    await set(ref(db, `assistencias/${key}`), assistenciasPartida)
-    await set(ref(db, `mvps/${key}`), mvpFinal)
-    await set(ref(db, `sumulas/${key}`), sumula)
-    setModalJogo(null)
+    try {
+      await salvarHistoricoSumula(key, sumulas[key] ? "edicao" : "criacao", sumulas[key])
+      await update(ref(db), {
+        [`resultados/${key}`]: resultado,
+        [`gols/${key}`]: golsNormalizados,
+        [`assistencias/${key}`]: assistenciasPartida,
+        [`mvps/${key}`]: mvpFinal,
+        [`sumulas/${key}`]: sumula,
+      })
+      mostrarAviso("Súmula salva e estatísticas atualizadas.", "sucesso")
+      setModalJogo(null)
+    } catch (error) {
+      mostrarAviso("Não foi possível salvar. Verifique login/permissões do Firebase.", "erro")
+    }
   }
 
   const excluirSumula = async () => {
@@ -372,19 +405,26 @@ export default function App() {
     const key = modalJogo.key
     if (!window.confirm("Excluir esta súmula? A classificação e estatísticas desse jogo serão removidas.")) return
 
-    await salvarHistoricoSumula(key, "exclusao", {
-      resultado: resultados[key] || null,
-      gols: gols[key] || [],
-      assistencias: assistencias[key] || [],
-      mvp: mvps[key] || "",
-      sumula: sumulas[key] || null,
-    })
-    await set(ref(db, `resultados/${key}`), null)
-    await set(ref(db, `gols/${key}`), null)
-    await set(ref(db, `assistencias/${key}`), null)
-    await set(ref(db, `mvps/${key}`), null)
-    await set(ref(db, `sumulas/${key}`), null)
-    setModalJogo(null)
+    try {
+      await salvarHistoricoSumula(key, "exclusao", {
+        resultado: resultados[key] || null,
+        gols: gols[key] || [],
+        assistencias: assistencias[key] || [],
+        mvp: mvps[key] || "",
+        sumula: sumulas[key] || null,
+      })
+      await update(ref(db), {
+        [`resultados/${key}`]: null,
+        [`gols/${key}`]: null,
+        [`assistencias/${key}`]: null,
+        [`mvps/${key}`]: null,
+        [`sumulas/${key}`]: null,
+      })
+      mostrarAviso("Súmula excluída.", "sucesso")
+      setModalJogo(null)
+    } catch (error) {
+      mostrarAviso("Não foi possível excluir. Verifique login/permissões do Firebase.", "erro")
+    }
   }
 
   const entrarAdmin = async () => {
@@ -436,6 +476,7 @@ export default function App() {
       assistencias,
       mvps,
       sumulas,
+      votacoes,
       fotos,
     }
     baixarArquivo("atletico-champions-backup.json", JSON.stringify(backup, null, 2), "application/json")
@@ -462,15 +503,26 @@ export default function App() {
   }
 
   const adicionarFoto = async () => {
-    if (!novaFotoUrl.trim()) return
-    const novaRef = push(ref(db, `fotos/${rodadaFotoSelecionada}`))
-    await set(novaRef, { url: novaFotoUrl.trim(), legenda: novaFotoLegenda.trim() })
-    setNovaFotoUrl("")
-    setNovaFotoLegenda("")
+    if (!isAdmin || !novaFotoUrl.trim()) return
+    try {
+      const novaRef = push(ref(db, `fotos/${rodadaFotoSelecionada}`))
+      await set(novaRef, { url: novaFotoUrl.trim(), legenda: novaFotoLegenda.trim() })
+      setNovaFotoUrl("")
+      setNovaFotoLegenda("")
+      mostrarAviso("Foto adicionada.", "sucesso")
+    } catch (error) {
+      mostrarAviso("Não foi possível adicionar a foto.", "erro")
+    }
   }
 
   const removerFoto = async (rodada, fotoId) => {
-    await set(ref(db, `fotos/${rodada}/${fotoId}`), null)
+    if (!isAdmin) return
+    try {
+      await set(ref(db, `fotos/${rodada}/${fotoId}`), null)
+      mostrarAviso("Foto removida.", "sucesso")
+    } catch (error) {
+      mostrarAviso("Não foi possível remover a foto.", "erro")
+    }
   }
 
   // ── confronto direto entre dois times (turno + returno) ──
@@ -597,6 +649,13 @@ export default function App() {
   }
 
   const normalizarCPF = (valor) => valor.replace(/\D/g, "")
+  const formatarCPF = (valor) => {
+    const cpf = normalizarCPF(valor).slice(0, 11)
+    return cpf
+      .replace(/(\d{3})(\d)/, "$1.$2")
+      .replace(/(\d{3})(\d)/, "$1.$2")
+      .replace(/(\d{3})(\d{1,2})$/, "$1-$2")
+  }
 
   const gerarChaveCPF = async (cpf) => {
     if (window.crypto?.subtle) {
@@ -617,47 +676,73 @@ export default function App() {
 
   const salvarVoto = async () => {
     if (!modalVotacao) return
+    if (!votacoes[modalVotacao.key]?.aberta) {
+      setVotoErro("A votação deste jogo está fechada.")
+      return
+    }
     const cpf = normalizarCPF(cpfVotacao)
     if (cpf.length !== 11) {
-      setVotoErro("Informe um CPF com 11 digitos.")
+      setVotoErro("Informe um CPF com 11 dígitos.")
       return
     }
     const chaveCPF = await gerarChaveCPF(cpf)
     if (votacoes[modalVotacao.key]?.votos?.[chaveCPF]) {
-      setVotoErro("Este CPF ja votou nesse jogo.")
+      setVotoErro("Este CPF já votou nesse jogo.")
       return
     }
-    const notas = {}
+    const notas = []
     modalVotacao.jogadores.forEach(j => {
       const valor = Number(notasVotacao[j.nome])
-      if (Number.isFinite(valor) && valor >= 0 && valor <= 10) notas[j.nome] = valor
+      if (Number.isFinite(valor) && valor >= 0 && valor <= 10) notas.push({ jogador: j.nome, nota: valor })
     })
-    if (Object.keys(notas).length === 0) {
-      setVotoErro("De pelo menos uma nota de 0 a 10.")
+    if (notas.length === 0) {
+      setVotoErro("Dê pelo menos uma nota de 0 a 10.")
       return
     }
-    await set(ref(db, `votacoes/${modalVotacao.key}/votos/${chaveCPF}`), {
-      notas,
-      criadoEm: new Date().toISOString(),
-    })
-    setModalVotacao(null)
+    try {
+      const resultado = await runTransaction(ref(db, `votacoes/${modalVotacao.key}/votos/${chaveCPF}`), votoAtual => {
+        if (votoAtual) return
+        return {
+          notas,
+          criadoEm: new Date().toISOString(),
+        }
+      })
+      if (!resultado.committed) {
+        setVotoErro("Este CPF já votou nesse jogo.")
+        return
+      }
+      mostrarAviso("Voto registrado. Obrigado!", "sucesso")
+      setModalVotacao(null)
+    } catch (error) {
+      setVotoErro("Não foi possível registrar o voto. Tente novamente.")
+    }
   }
 
   const definirVotacao = async (key, aberta, jogo, rodada, jogoIdx) => {
-    await set(ref(db, `votacoes/${key}/aberta`), aberta)
-    await set(ref(db, `votacoes/${key}/rodada`), rodada)
-    await set(ref(db, `votacoes/${key}/jogoIdx`), jogoIdx)
-    await set(ref(db, `votacoes/${key}/casa`), jogo[0])
-    await set(ref(db, `votacoes/${key}/fora`), jogo[1])
+    if (!isAdmin) return
+    try {
+      await update(ref(db), {
+        [`votacoes/${key}/aberta`]: aberta,
+        [`votacoes/${key}/rodada`]: rodada,
+        [`votacoes/${key}/jogoIdx`]: jogoIdx,
+        [`votacoes/${key}/casa`]: jogo[0],
+        [`votacoes/${key}/fora`]: jogo[1],
+      })
+      mostrarAviso(aberta ? "Votação aberta para este jogo." : "Votação fechada.", "sucesso")
+    } catch (error) {
+      mostrarAviso("Não foi possível alterar a votação.", "erro")
+    }
   }
 
   const compartilharVotacao = (key, jogo) => {
-    const texto = `Votacao aberta - ${jogo[0]} x ${jogo[1]}\nDe sua nota de 0 a 10 e ajude a escolher o MVP:\n${window.location.href}`
+    const url = new URL(window.location.href)
+    url.searchParams.set("voto", key)
+    const texto = `Votação aberta - ${jogo[0]} x ${jogo[1]}\nDê sua nota de 0 a 10 e ajude a escolher o MVP:\n${url.toString()}`
     if (navigator.share) {
       navigator.share({ text: texto }).catch(() => {})
     } else {
       navigator.clipboard.writeText(texto)
-      alert("Link da votacao copiado para enviar no WhatsApp.")
+      alert("Link da votação copiado para enviar no WhatsApp.")
     }
   }
 
@@ -665,6 +750,17 @@ export default function App() {
   const jogadoresFora = modalJogo ? getJogadoresDoTimeNaRodada(modalJogo.fora, modalJogo.rodada) : []
   const todosJogadores = modalJogo ? getJogadoresDaPartida(modalJogo.casa, modalJogo.fora, modalJogo.rodada) : []
   const mvpAutomaticoModal = modalJogo ? getMvpAutomatico(modalJogo.key) : ""
+
+  useEffect(() => {
+    if (loading || modalVotacao) return
+    const params = new URLSearchParams(window.location.search)
+    const key = params.get("voto")
+    if (!key || votoLinkAberto === key) return
+    const votacao = votacoes[key]
+    if (!votacao?.aberta || !votacao.casa || !votacao.fora || !votacao.rodada) return
+    abrirModalVotacao(key, Number(votacao.rodada), Number(votacao.jogoIdx || 0), votacao.casa, votacao.fora)
+    setVotoLinkAberto(key)
+  }, [loading, votacoes, modalVotacao, votoLinkAberto])
 
   const S = {
     page: { minHeight: "100vh", background: "#0a0e1a", color: "#fff", fontFamily: "'Segoe UI', sans-serif" },
@@ -690,14 +786,14 @@ export default function App() {
       {/* HEADER */}
       <div style={S.header}>
         <div style={S.inner}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
             <div style={{ fontSize: 36 }}>🏆</div>
-            <div style={{ flex: 1 }}>
+            <div style={{ flex: 1, minWidth: 180 }}>
               <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: 1, color: "#FFD700" }}>CHAMPIONS LEAGUE</div>
               <div style={{ fontSize: 12, color: "#6b7db3", letterSpacing: 2 }}>ATLÉTICO PARAÍSO • 2026</div>
             </div>
             {!isAdmin ? (
-              <div style={{ display: "grid", gap: 5, width: 220 }}>
+              <div style={{ display: "grid", gap: 5, width: "min(100%, 240px)", marginLeft: "auto" }}>
                 <input placeholder="E-mail admin (opcional)" type="email" value={adminEmail}
                   onChange={e => setAdminEmail(e.target.value)}
                   style={{ padding: "6px 8px", background: "#1a1f3a", border: "1px solid #1e2d5a", borderRadius: 6, color: "#fff", fontSize: 12 }} />
@@ -723,6 +819,21 @@ export default function App() {
               </div>
             )}
           </div>
+
+          {aviso && (
+            <div style={{
+              background: aviso.tipo === "erro" ? "#f4433622" : "#22c55e22",
+              border: `1px solid ${aviso.tipo === "erro" ? "#f4433655" : "#22c55e55"}`,
+              color: aviso.tipo === "erro" ? "#fca5a5" : "#86efac",
+              borderRadius: 8,
+              padding: "8px 12px",
+              fontSize: 12,
+              fontWeight: 700,
+              marginBottom: 12,
+            }}>
+              {aviso.texto}
+            </div>
+          )}
 
           {proximaRodada && (
             <div onClick={() => setTab(4)} style={{
@@ -996,9 +1107,9 @@ export default function App() {
                   const tFora = getTimeByNome(jogo[1])
                   const horario = jogo[2]
                   return (
-                    <div key={ji} style={{ ...S.card, display: "flex", alignItems: "center", gap: 8 }}>
+                    <div key={ji} style={{ ...S.card, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                       <div onClick={() => abrirModal(r.rodada, ji, jogo[0], jogo[1])}
-                        style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, cursor: isAdmin ? "pointer" : "default" }}
+                        style={{ flex: 1, minWidth: 260, display: "flex", alignItems: "center", gap: 8, cursor: isAdmin ? "pointer" : "default" }}
                       >
                         <div style={{ flex: 1, textAlign: "right" }}>
                           <div style={{ fontWeight: 700, fontSize: 13 }}>{jogo[0]}</div>
@@ -1062,7 +1173,7 @@ export default function App() {
               const jogadoresTime = JOGADORES.filter(j => j.time === timeSelecionado)
               const goleiro = GOLEIROS[timeSelecionado]
               const goleiroJogador = JOGADORES.find(j => j.nome === goleiro)
-              const incompleto = TIMES_INCOMPLETOS[timeSelecionado]
+              const incompleto = TIMES_INCOMPLETOS[timeSelecionado] || jogadoresTime.length < 7
               const artMap = calcArtilheiros()
               const assMap = calcAssistencias()
               const mvpMap = calcMvps()
@@ -1545,7 +1656,7 @@ export default function App() {
           <div style={{ background: "#111827", border: "1px solid #22c55e55", borderRadius: 16, width: "100%", maxWidth: 440, maxHeight: "90vh", overflowY: "auto", padding: 20 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
               <div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: "#22c55e" }}>Votacao do Jogo</div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: "#22c55e" }}>Votação do Jogo</div>
                 <div style={{ fontSize: 12, color: "#8899cc", marginTop: 4 }}>{modalVotacao.casa} x {modalVotacao.fora}</div>
               </div>
               <button onClick={() => setModalVotacao(null)}
@@ -1553,14 +1664,16 @@ export default function App() {
             </div>
 
             <input
-              placeholder="CPF para controlar voto unico"
+              placeholder="CPF para controlar voto único"
               value={cpfVotacao}
-              onChange={e => setCpfVotacao(e.target.value)}
+              onChange={e => setCpfVotacao(formatarCPF(e.target.value))}
+              inputMode="numeric"
+              maxLength={14}
               style={S.select}
             />
 
             <div style={{ fontSize: 11, color: "#6b7db3", marginBottom: 10 }}>
-              De notas de 0 a 10. A maior media vira o MVP automatico, mas o admin ainda pode trocar na sumula.
+              Dê notas de 0 a 10. A maior média vira o MVP automático, mas o admin ainda pode trocar na súmula.
             </div>
 
             {modalVotacao.jogadores.map(j => (
@@ -1575,7 +1688,12 @@ export default function App() {
                   max="10"
                   step="0.5"
                   value={notasVotacao[j.nome] ?? ""}
-                  onChange={e => setNotasVotacao(prev => ({ ...prev, [j.nome]: e.target.value }))}
+                  onChange={e => {
+                    const valor = e.target.value
+                    if (valor === "" || (Number(valor) >= 0 && Number(valor) <= 10)) {
+                      setNotasVotacao(prev => ({ ...prev, [j.nome]: valor }))
+                    }
+                  }}
                   style={{ ...S.select, marginBottom: 0, textAlign: "center" }}
                 />
               </div>
@@ -1719,7 +1837,7 @@ export default function App() {
                 <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13, color: "#c084fc" }}>🌟 MVP da Partida</div>
                 {mvpAutomaticoModal && (
                   <div style={{ background: "#c084fc18", border: "1px solid #c084fc55", borderRadius: 8, padding: 10, marginBottom: 8, fontSize: 12, color: "#d8b4fe", display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ flex: 1 }}>MVP automatico pela votacao: <strong>{mvpAutomaticoModal}</strong></span>
+                    <span style={{ flex: 1 }}>MVP automático pela votação: <strong>{mvpAutomaticoModal}</strong></span>
                     <button onClick={() => setMvpSelecionado(mvpAutomaticoModal)}
                       style={{ background: "#c084fc", border: "none", borderRadius: 6, padding: "5px 8px", color: "#0a0e1a", fontWeight: 800, cursor: "pointer", fontSize: 11 }}>
                       Usar

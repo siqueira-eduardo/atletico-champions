@@ -44,7 +44,7 @@ export const JOGADORES = [
   { nome: "Alerrandro", time: 4, funcao: "Jogador", posicao: null },
   { nome: "Dedé Isídio", time: 4, funcao: "Jogador", posicao: null },
 
-  // Barcelona ✅ (7 linha + goleiro)
+  // Barcelona (6 linha + goleiro)
   { nome: "Bruno Elves", time: 5, funcao: "Capitão", posicao: null },
   { nome: "Fagner Forasteiro", time: 5, funcao: "Jogador", posicao: null },
   { nome: "Chico", time: 5, funcao: "Jogador", posicao: null },
@@ -78,7 +78,7 @@ export const GOLEIROS = {
 }
 
 export const TIMES_INCOMPLETOS = {
-  1: false, 2: false, 3: false, 4: false, 5: false, 6: false
+  1: false, 2: false, 3: false, 4: false, 5: true, 6: false
 }
 
 export const RODADAS = [

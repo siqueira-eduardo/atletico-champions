@@ -1,22 +1,22 @@
-# Champions League Atletico Paraiso 2026
+# Champions League Atlético Paraíso 2026
 
-Sistema completo para gerenciamento da Champions League Atletico Paraiso.
+Sistema para gerenciamento da Champions League Atlético Paraíso.
+
+Produção: https://atletico-champions.vercel.app
 
 ## Funcionalidades
 
-- Classificacao automatica
-- Artilharia
-- Assistencias
-- MVP
-- Mata-mata
-- Elencos
-- Estatisticas
-- Sumula do jogo com gols, assistencias, MVP, cartoes e ocorrencias
-- Exportacao JSON/CSV
-- Galeria de fotos
+- Classificação automática
+- Artilharia, assistências e MVP
+- Súmula com gols, assistências, cartões, ocorrências e observações
+- Votação por CPF com nota de 0 a 10
+- MVP automático pela votação, com ajuste manual do admin
+- Média acumulada no perfil do jogador
+- Elencos, mata-mata, regras e galeria de fotos
+- Exportação JSON/CSV
 - Firebase em tempo real
 
-## Instalacao
+## Instalação
 
 ```bash
 npm install
@@ -29,18 +29,18 @@ npm run dev
 npm run build
 ```
 
-## Tecnologias
-
-- React
-- Vite
-- Firebase
-
 ## Firebase
 
-Edite `src/firebase.js` com as credenciais do seu projeto Firebase antes de publicar.
+As credenciais estão em `src/firebase.js`.
+
+Para aplicar as regras do Realtime Database:
+
+```bash
+firebase deploy --only database
+```
+
+As regras deixam a leitura pública, restringem gravações administrativas a usuários autenticados e permitem voto público somente quando a votação do jogo estiver aberta.
 
 ## Admin
 
-O app aceita login por Firebase Auth usando e-mail/senha. Se o e-mail ficar vazio, o PIN local `3417` continua funcionando como atalho.
-
-Para seguranca real, habilite Email/Password no Firebase Authentication e aplique as regras de `database.rules.json` no Realtime Database. Com essas regras, leitura continua publica e escrita fica restrita a usuarios autenticados.
+O PIN local é `3417`. Para segurança real no Firebase, use login por Firebase Auth com e-mail/senha, porque regras de banco não conseguem validar um PIN local do navegador.
