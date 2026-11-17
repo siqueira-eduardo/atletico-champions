@@ -32,9 +32,6 @@ export default function App() {
   const [adminEmail, setAdminEmail] = useState("")
   const [senhaInput, setSenhaInput] = useState("")
   const [authError, setAuthError] = useState("")
-  const [cpfVotacao, setCpfVotacao] = useState("")
-  const [notasVotacao, setNotasVotacao] = useState({})
-  const [votoErro, setVotoErro] = useState("")
   const [votoLinkAberto, setVotoLinkAberto] = useState("")
   const [loading, setLoading] = useState(true)
   const [fotos, setFotos] = useState({})
@@ -376,7 +373,7 @@ export default function App() {
       acao,
       anterior,
       alteradoEm: new Date().toISOString(),
-      alteradoPor: authUser?.email || (adminModo === "pin" ? "PIN local" : "admin"),
+      alteradoPor: authUser?.email || ("admin"),
     })
   }
 
@@ -682,34 +679,9 @@ export default function App() {
     }
   }
 
-  const normalizarCPF = (valor) => valor.replace(/\D/g, "")
-  const formatarCPF = (valor) => {
-    const cpf = normalizarCPF(valor).slice(0, 11)
-    return cpf
-      .replace(/(\d{3})(\d)/, "$1.$2")
-      .replace(/(\d{3})(\d)/, "$1.$2")
-      .replace(/(\d{3})(\d{1,2})$/, "$1-$2")
-  }
-
-  const gerarChaveCPF = async (cpf) => {
-    if (window.crypto?.subtle) {
-      const bytes = new TextEncoder().encode(cpf)
-      const hash = await window.crypto.subtle.digest("SHA-256", bytes)
-      return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, "0")).join("")
-    }
-    return btoa(cpf).replace(/[+/=]/g, "")
-  }
-
   const abrirModalVotacao = (key, rodada, jogoIdx, casa, fora) => {
     const jogadores = getJogadoresDaPartida(casa, fora, rodada)
     setModalVotacao({ key, rodada, jogoIdx, casa, fora, jogadores })
-    setCpfVotacao("")
-    setNotasVotacao(Object.fromEntries(jogadores.map(j => [j.nome, ""])))
-    setVotoErro("")
-  }
-
-  const salvarVoto = () => {
-    setVotoErro("A votação pública está suspensa até a implantação de validação segura no servidor.")
   }
 
   const definirVotacao = async (key, aberta, jogo, rodada, jogoIdx) => {
