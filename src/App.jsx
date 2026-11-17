@@ -4,9 +4,6 @@ import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebas
 import { auth, db } from './firebase'
 import { TIMES, JOGADORES, GOLEIROS, RODADAS, TABS, TIMES_INCOMPLETOS, REGRAS, MATA_MATA } from './data'
 
-// ── senha de admin (só quem souber pode lançar resultados) ──
-const SENHA_ADMIN = "3417"
-
 export default function App() {
   const [tab, setTab] = useState(0)
   const [resultados, setResultados] = useState({})
@@ -40,6 +37,7 @@ export default function App() {
   const [votoLinkAberto, setVotoLinkAberto] = useState("")
   const [loading, setLoading] = useState(true)
   const [fotos, setFotos] = useState({})
+  const [historicoSumulas, setHistoricoSumulas] = useState({})
   const [novaFotoUrl, setNovaFotoUrl] = useState("")
   const [novaFotoLegenda, setNovaFotoLegenda] = useState("")
   const [rodadaFotoSelecionada, setRodadaFotoSelecionada] = useState(1)
@@ -61,6 +59,7 @@ export default function App() {
       { key: 'sumulas', setter: setSumulas },
       { key: 'votacoes', setter: setVotacoes },
       { key: 'fotos', setter: setFotos },
+      { key: 'historicoSumulas', setter: setHistoricoSumulas },
     ]
     const unsubs = refs.map(({ key, setter }) =>
       onValue(ref(db, key), snap => {
@@ -76,25 +75,36 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, user => {
+    let unsubscribeAdmin = null
+    const unsubscribeAuth = onAuthStateChanged(auth, user => {
+      if (unsubscribeAdmin) {
+        unsubscribeAdmin()
+        unsubscribeAdmin = null
+      }
       setAuthUser(user)
-      if (user) {
-        setIsAdmin(true)
-        setAdminModo("firebase")
-        setAuthError("")
+      if (!user) {
+        setIsAdmin(false)
+        setAdminModo(null)
         return
       }
 
-      setAdminModo(modo => {
-        if (modo === "firebase") {
-          setIsAdmin(false)
-          return null
-        }
-        return modo
+      unsubscribeAdmin = onValue(ref(db, `admins/${user.uid}`), snapshot => {
+        const autorizado = snapshot.val() === true
+        setIsAdmin(autorizado)
+        setAdminModo(autorizado ? "firebase" : null)
+        setAuthError(autorizado ? "" : "Conta autenticada, mas sem permissão administrativa.")
+        if (!autorizado) signOut(auth).catch(() => {})
+      }, () => {
+        setIsAdmin(false)
+        setAdminModo(null)
+        setAuthError("Não foi possível verificar sua permissão administrativa.")
       })
     })
 
-    return unsubscribe
+    return () => {
+      if (unsubscribeAdmin) unsubscribeAdmin()
+      unsubscribeAuth()
+    }
   }, [])
 
   const getTimeByNome = (nome) => TIMES.find(t => t.nome === nome)
@@ -152,7 +162,15 @@ export default function App() {
         else { casa.e++; fora.e++; casa.pts++; fora.pts++ }
       }
     })
-    return tabela.sort((a, b) => b.pts - a.pts || b.sg - a.sg || b.gp - a.gp)
+    return tabela.sort((a, b) => {
+      const criterioGeral = b.pts - a.pts || b.sg - a.sg || b.gp - a.gp
+      if (criterioGeral !== 0) return criterioGeral
+      const confronto = calcConfrontoDireto(a.nome, b.nome)
+      const empates = confronto.jogos - confronto.vitoriasA - confronto.vitoriasB
+      const pontosA = confronto.vitoriasA * 3 + empates
+      const pontosB = confronto.vitoriasB * 3 + empates
+      return pontosB - pontosA || (confronto.golsB - confronto.golsA) || (confronto.golsB - confronto.golsA)
+    })
   }
 
   const calcArtilheiros = () => {
@@ -429,27 +447,20 @@ export default function App() {
 
   const entrarAdmin = async () => {
     setAuthError("")
-    if (adminEmail.trim()) {
-      try {
-        await signInWithEmailAndPassword(auth, adminEmail.trim(), senhaInput)
-        setSenhaInput("")
-      } catch {
-        setAuthError("Não foi possível entrar com esse e-mail/senha.")
-      }
+    if (!adminEmail.trim() || !senhaInput) {
+      setAuthError("Informe o e-mail e a senha cadastrados no Firebase Authentication.")
       return
     }
-
-    if (senhaInput === SENHA_ADMIN) {
-      setIsAdmin(true)
-      setAdminModo("pin")
+    try {
+      await signInWithEmailAndPassword(auth, adminEmail.trim(), senhaInput)
       setSenhaInput("")
-    } else {
-      setAuthError("Senha incorreta.")
+    } catch {
+      setAuthError("Não foi possível entrar. Verifique suas credenciais.")
     }
   }
 
   const sairAdmin = async () => {
-    if (adminModo === "firebase") await signOut(auth)
+    await signOut(auth)
     setIsAdmin(false)
     setAdminModo(null)
     setAuthUser(null)
@@ -478,6 +489,7 @@ export default function App() {
       sumulas,
       votacoes,
       fotos,
+      historicoSumulas,
     }
     baixarArquivo("atletico-champions-backup.json", JSON.stringify(backup, null, 2), "application/json")
   }
@@ -794,11 +806,11 @@ export default function App() {
             </div>
             {!isAdmin ? (
               <div style={{ display: "grid", gap: 5, width: "min(100%, 240px)", marginLeft: "auto" }}>
-                <input placeholder="E-mail admin (opcional)" type="email" value={adminEmail}
+                <input placeholder="E-mail do administrador" type="email" value={adminEmail}
                   onChange={e => setAdminEmail(e.target.value)}
                   style={{ padding: "6px 8px", background: "#1a1f3a", border: "1px solid #1e2d5a", borderRadius: 6, color: "#fff", fontSize: 12 }} />
                 <div style={{ display: "flex", gap: 6 }}>
-                  <input placeholder="Senha ou PIN" type="password" value={senhaInput}
+                  <input placeholder="Senha do Firebase" type="password" value={senhaInput}
                     onChange={e => setSenhaInput(e.target.value)}
                     onKeyDown={e => e.key === "Enter" && entrarAdmin()}
                     style={{ minWidth: 0, flex: 1, padding: "6px 8px", background: "#1a1f3a", border: "1px solid #1e2d5a", borderRadius: 6, color: "#fff", fontSize: 12 }} />
@@ -811,7 +823,7 @@ export default function App() {
             ) : (
               <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
                 <span style={{ fontSize: 11, color: "#4caf50", fontWeight: 700 }}>
-                  ✓ ADMIN {authUser?.email ? `• ${authUser.email}` : "• PIN"}
+                  ✓ ADMIN • {authUser?.email}
                 </span>
                 <button onClick={exportarBackup} style={{ padding: "4px 8px", background: "none", border: "1px solid #1e2d5a", borderRadius: 6, color: "#FFD700", fontSize: 11, cursor: "pointer" }}>JSON</button>
                 <button onClick={exportarCSV} style={{ padding: "4px 8px", background: "none", border: "1px solid #1e2d5a", borderRadius: 6, color: "#6CABDD", fontSize: 11, cursor: "pointer" }}>CSV</button>
@@ -1352,14 +1364,14 @@ export default function App() {
             })()}
 
             {/* Semifinais */}
-            <div style={{ fontWeight: 700, color: "#FFD700", fontSize: 13, letterSpacing: 1, marginBottom: 10 }}>SEMIFINAIS (29+1+29 min)</div>
+            <div style={{ fontWeight: 700, color: "#FFD700", fontSize: 13, letterSpacing: 1, marginBottom: 10 }}>SEMIFINAIS (15 + 15 min por jogo)</div>
 
-            {MATA_MATA.filter(f => f.fase.includes("Semi")).slice(0,1).map((fase, fi) => (
+            {MATA_MATA.filter(f => f.fase.includes("Semi")).map((fase, fi) => (
               <div key={fi}>
                 {fase.jogos.map((jogo, ji) => (
                   <div key={ji} style={{ ...S.card, marginBottom: 8 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                      <div style={{ fontSize: 11, color: "#6b7db3" }}>SEMI {ji + 1} — ida {fase.data} / volta 18/09</div>
+                      <div style={{ fontSize: 11, color: "#6b7db3" }}> {fase.fase.toUpperCase()} • SEMI {ji + 1} • {fase.data}/2026</div>
                       <div style={{ fontSize: 11, color: "#FFD700" }}>⏰ {jogo[2]}</div>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 16 }}>
