@@ -60,7 +60,6 @@ export default function App() {
       { key: 'sumulas', setter: setSumulas },
       { key: 'votacoesPublicas', setter: setVotacoes },
       { key: 'fotos', setter: setFotos },
-      { key: 'historicoSumulas', setter: setHistoricoSumulas },
     ]
     const unsubs = refs.map(({ key, setter }) =>
       onValue(ref(db, key), snap => {
@@ -78,6 +77,7 @@ export default function App() {
   useEffect(() => {
     let unsubscribeAdmin = null
     let unsubscribeVotes = null
+    let unsubscribeHistory = null
     const unsubscribeAuth = onAuthStateChanged(auth, user => {
       if (unsubscribeAdmin) {
         unsubscribeAdmin()
@@ -87,11 +87,16 @@ export default function App() {
         unsubscribeVotes()
         unsubscribeVotes = null
       }
+      if (unsubscribeHistory) {
+        unsubscribeHistory()
+        unsubscribeHistory = null
+      }
       setAuthUser(user)
       if (!user) {
         setIsAdmin(false)
         setAdminModo(null)
         setVotosAdmin({})
+        setHistoricoSumulas({})
         return
       }
 
@@ -102,8 +107,10 @@ export default function App() {
         setAuthError(autorizado ? "" : "Conta autenticada, mas sem permissão administrativa.")
         if (autorizado) {
           unsubscribeVotes = onValue(ref(db, "votacoes"), votesSnapshot => setVotosAdmin(votesSnapshot.val() || {}))
+          unsubscribeHistory = onValue(ref(db, "historicoSumulas"), historySnapshot => setHistoricoSumulas(historySnapshot.val() || {}))
         } else {
           setVotosAdmin({})
+          setHistoricoSumulas({})
           signOut(auth).catch(() => {})
         }
       }, () => {
@@ -116,6 +123,7 @@ export default function App() {
     return () => {
       if (unsubscribeAdmin) unsubscribeAdmin()
       if (unsubscribeVotes) unsubscribeVotes()
+      if (unsubscribeHistory) unsubscribeHistory()
       unsubscribeAuth()
     }
   }, [])
