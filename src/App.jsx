@@ -1,11 +1,8 @@
 import { useState, useEffect } from 'react'
-import { ref, onValue, set, push, update, runTransaction } from 'firebase/database'
+import { ref, onValue, set, push, update } from 'firebase/database'
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth'
 import { auth, db } from './firebase'
 import { TIMES, JOGADORES, GOLEIROS, RODADAS, TABS, TIMES_INCOMPLETOS, REGRAS, MATA_MATA } from './data'
-
-// ── senha de admin (só quem souber pode lançar resultados) ──
-const SENHA_ADMIN = "3417"
 
 export default function App() {
   const [tab, setTab] = useState(0)
@@ -15,6 +12,7 @@ export default function App() {
   const [mvps, setMvps] = useState({})
   const [sumulas, setSumulas] = useState({})
   const [votacoes, setVotacoes] = useState({})
+  const [votosAdmin, setVotosAdmin] = useState({})
   const [modalJogo, setModalJogo] = useState(null)
   const [modalVotacao, setModalVotacao] = useState(null)
   const [formGol, setFormGol] = useState({ jogador: "", assistencia: "" })
@@ -34,12 +32,10 @@ export default function App() {
   const [adminEmail, setAdminEmail] = useState("")
   const [senhaInput, setSenhaInput] = useState("")
   const [authError, setAuthError] = useState("")
-  const [cpfVotacao, setCpfVotacao] = useState("")
-  const [notasVotacao, setNotasVotacao] = useState({})
-  const [votoErro, setVotoErro] = useState("")
   const [votoLinkAberto, setVotoLinkAberto] = useState("")
   const [loading, setLoading] = useState(true)
   const [fotos, setFotos] = useState({})
+  const [historicoSumulas, setHistoricoSumulas] = useState({})
   const [novaFotoUrl, setNovaFotoUrl] = useState("")
   const [novaFotoLegenda, setNovaFotoLegenda] = useState("")
   const [rodadaFotoSelecionada, setRodadaFotoSelecionada] = useState(1)
@@ -59,7 +55,7 @@ export default function App() {
       { key: 'assistencias', setter: setAssistencias },
       { key: 'mvps', setter: setMvps },
       { key: 'sumulas', setter: setSumulas },
-      { key: 'votacoes', setter: setVotacoes },
+      { key: 'votacoesPublicas', setter: setVotacoes },
       { key: 'fotos', setter: setFotos },
     ]
     const unsubs = refs.map(({ key, setter }) =>
@@ -76,25 +72,57 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, user => {
+    let unsubscribeAdmin = null
+    let unsubscribeVotes = null
+    let unsubscribeHistory = null
+    const unsubscribeAuth = onAuthStateChanged(auth, user => {
+      if (unsubscribeAdmin) {
+        unsubscribeAdmin()
+        unsubscribeAdmin = null
+      }
+      if (unsubscribeVotes) {
+        unsubscribeVotes()
+        unsubscribeVotes = null
+      }
+      if (unsubscribeHistory) {
+        unsubscribeHistory()
+        unsubscribeHistory = null
+      }
       setAuthUser(user)
-      if (user) {
-        setIsAdmin(true)
-        setAdminModo("firebase")
-        setAuthError("")
+      if (!user) {
+        setIsAdmin(false)
+        setAdminModo(null)
+        setVotosAdmin({})
+        setHistoricoSumulas({})
         return
       }
 
-      setAdminModo(modo => {
-        if (modo === "firebase") {
-          setIsAdmin(false)
-          return null
+      unsubscribeAdmin = onValue(ref(db, `admins/${user.uid}`), snapshot => {
+        const autorizado = snapshot.val() === true
+        setIsAdmin(autorizado)
+        setAdminModo(autorizado ? "firebase" : null)
+        setAuthError(autorizado ? "" : "Conta autenticada, mas sem permissão administrativa.")
+        if (autorizado) {
+          unsubscribeVotes = onValue(ref(db, "votacoes"), votesSnapshot => setVotosAdmin(votesSnapshot.val() || {}))
+          unsubscribeHistory = onValue(ref(db, "historicoSumulas"), historySnapshot => setHistoricoSumulas(historySnapshot.val() || {}))
+        } else {
+          setVotosAdmin({})
+          setHistoricoSumulas({})
+          signOut(auth).catch(() => {})
         }
-        return modo
+      }, () => {
+        setIsAdmin(false)
+        setAdminModo(null)
+        setAuthError("Não foi possível verificar sua permissão administrativa.")
       })
     })
 
-    return unsubscribe
+    return () => {
+      if (unsubscribeAdmin) unsubscribeAdmin()
+      if (unsubscribeVotes) unsubscribeVotes()
+      if (unsubscribeHistory) unsubscribeHistory()
+      unsubscribeAuth()
+    }
   }, [])
 
   const getTimeByNome = (nome) => TIMES.find(t => t.nome === nome)
@@ -152,7 +180,15 @@ export default function App() {
         else { casa.e++; fora.e++; casa.pts++; fora.pts++ }
       }
     })
-    return tabela.sort((a, b) => b.pts - a.pts || b.sg - a.sg || b.gp - a.gp)
+    return tabela.sort((a, b) => {
+      const criterioGeral = b.pts - a.pts || b.sg - a.sg || b.gp - a.gp
+      if (criterioGeral !== 0) return criterioGeral
+      const confronto = calcConfrontoDireto(a.nome, b.nome)
+      const empates = confronto.jogos - confronto.vitoriasA - confronto.vitoriasB
+      const pontosA = confronto.vitoriasA * 3 + empates
+      const pontosB = confronto.vitoriasB * 3 + empates
+      return pontosB - pontosA || (confronto.golsB - confronto.golsA) || (confronto.golsB - confronto.golsA)
+    })
   }
 
   const calcArtilheiros = () => {
@@ -203,7 +239,7 @@ export default function App() {
   }
 
   const calcMediasVotacao = (key) => {
-    const votos = Object.values(votacoes[key]?.votos || {})
+    const votos = Object.values(votosAdmin[key]?.votos || {})
     const notas = {}
     votos.forEach(voto => {
       getNotasDoVoto(voto).forEach(([nome, nota]) => {
@@ -221,7 +257,7 @@ export default function App() {
 
   const calcNotasGerais = () => {
     const notas = {}
-    Object.entries(votacoes).forEach(([key, votacao]) => {
+    Object.entries(votosAdmin).forEach(([key, votacao]) => {
       Object.values(votacao?.votos || {}).forEach(voto => {
         getNotasDoVoto(voto).forEach(([nome, nota]) => {
           const valor = Number(nota)
@@ -337,7 +373,7 @@ export default function App() {
       acao,
       anterior,
       alteradoEm: new Date().toISOString(),
-      alteradoPor: authUser?.email || (adminModo === "pin" ? "PIN local" : "admin"),
+      alteradoPor: authUser?.email || ("admin"),
     })
   }
 
@@ -429,27 +465,20 @@ export default function App() {
 
   const entrarAdmin = async () => {
     setAuthError("")
-    if (adminEmail.trim()) {
-      try {
-        await signInWithEmailAndPassword(auth, adminEmail.trim(), senhaInput)
-        setSenhaInput("")
-      } catch {
-        setAuthError("Não foi possível entrar com esse e-mail/senha.")
-      }
+    if (!adminEmail.trim() || !senhaInput) {
+      setAuthError("Informe o e-mail e a senha cadastrados no Firebase Authentication.")
       return
     }
-
-    if (senhaInput === SENHA_ADMIN) {
-      setIsAdmin(true)
-      setAdminModo("pin")
+    try {
+      await signInWithEmailAndPassword(auth, adminEmail.trim(), senhaInput)
       setSenhaInput("")
-    } else {
-      setAuthError("Senha incorreta.")
+    } catch {
+      setAuthError("Não foi possível entrar. Verifique suas credenciais.")
     }
   }
 
   const sairAdmin = async () => {
-    if (adminModo === "firebase") await signOut(auth)
+    await signOut(auth)
     setIsAdmin(false)
     setAdminModo(null)
     setAuthUser(null)
@@ -477,7 +506,9 @@ export default function App() {
       mvps,
       sumulas,
       votacoes,
+      votosAdmin,
       fotos,
+      historicoSumulas,
     }
     baixarArquivo("atletico-champions-backup.json", JSON.stringify(backup, null, 2), "application/json")
   }
@@ -648,74 +679,9 @@ export default function App() {
     }
   }
 
-  const normalizarCPF = (valor) => valor.replace(/\D/g, "")
-  const formatarCPF = (valor) => {
-    const cpf = normalizarCPF(valor).slice(0, 11)
-    return cpf
-      .replace(/(\d{3})(\d)/, "$1.$2")
-      .replace(/(\d{3})(\d)/, "$1.$2")
-      .replace(/(\d{3})(\d{1,2})$/, "$1-$2")
-  }
-
-  const gerarChaveCPF = async (cpf) => {
-    if (window.crypto?.subtle) {
-      const bytes = new TextEncoder().encode(cpf)
-      const hash = await window.crypto.subtle.digest("SHA-256", bytes)
-      return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, "0")).join("")
-    }
-    return btoa(cpf).replace(/[+/=]/g, "")
-  }
-
   const abrirModalVotacao = (key, rodada, jogoIdx, casa, fora) => {
     const jogadores = getJogadoresDaPartida(casa, fora, rodada)
     setModalVotacao({ key, rodada, jogoIdx, casa, fora, jogadores })
-    setCpfVotacao("")
-    setNotasVotacao(Object.fromEntries(jogadores.map(j => [j.nome, ""])))
-    setVotoErro("")
-  }
-
-  const salvarVoto = async () => {
-    if (!modalVotacao) return
-    if (!votacoes[modalVotacao.key]?.aberta) {
-      setVotoErro("A votação deste jogo está fechada.")
-      return
-    }
-    const cpf = normalizarCPF(cpfVotacao)
-    if (cpf.length !== 11) {
-      setVotoErro("Informe um CPF com 11 dígitos.")
-      return
-    }
-    const chaveCPF = await gerarChaveCPF(cpf)
-    if (votacoes[modalVotacao.key]?.votos?.[chaveCPF]) {
-      setVotoErro("Este CPF já votou nesse jogo.")
-      return
-    }
-    const notas = []
-    modalVotacao.jogadores.forEach(j => {
-      const valor = Number(notasVotacao[j.nome])
-      if (Number.isFinite(valor) && valor >= 0 && valor <= 10) notas.push({ jogador: j.nome, nota: valor })
-    })
-    if (notas.length === 0) {
-      setVotoErro("Dê pelo menos uma nota de 0 a 10.")
-      return
-    }
-    try {
-      const resultado = await runTransaction(ref(db, `votacoes/${modalVotacao.key}/votos/${chaveCPF}`), votoAtual => {
-        if (votoAtual) return
-        return {
-          notas,
-          criadoEm: new Date().toISOString(),
-        }
-      })
-      if (!resultado.committed) {
-        setVotoErro("Este CPF já votou nesse jogo.")
-        return
-      }
-      mostrarAviso("Voto registrado. Obrigado!", "sucesso")
-      setModalVotacao(null)
-    } catch (error) {
-      setVotoErro("Não foi possível registrar o voto. Tente novamente.")
-    }
   }
 
   const definirVotacao = async (key, aberta, jogo, rodada, jogoIdx) => {
@@ -727,6 +693,7 @@ export default function App() {
         [`votacoes/${key}/jogoIdx`]: jogoIdx,
         [`votacoes/${key}/casa`]: jogo[0],
         [`votacoes/${key}/fora`]: jogo[1],
+        [`votacoesPublicas/${key}`]: { aberta, rodada, jogoIdx, casa: jogo[0], fora: jogo[1] },
       })
       mostrarAviso(aberta ? "Votação aberta para este jogo." : "Votação fechada.", "sucesso")
     } catch (error) {
@@ -794,11 +761,11 @@ export default function App() {
             </div>
             {!isAdmin ? (
               <div style={{ display: "grid", gap: 5, width: "min(100%, 240px)", marginLeft: "auto" }}>
-                <input placeholder="E-mail admin (opcional)" type="email" value={adminEmail}
+                <input placeholder="E-mail do administrador" type="email" value={adminEmail}
                   onChange={e => setAdminEmail(e.target.value)}
                   style={{ padding: "6px 8px", background: "#1a1f3a", border: "1px solid #1e2d5a", borderRadius: 6, color: "#fff", fontSize: 12 }} />
                 <div style={{ display: "flex", gap: 6 }}>
-                  <input placeholder="Senha ou PIN" type="password" value={senhaInput}
+                  <input placeholder="Senha do Firebase" type="password" value={senhaInput}
                     onChange={e => setSenhaInput(e.target.value)}
                     onKeyDown={e => e.key === "Enter" && entrarAdmin()}
                     style={{ minWidth: 0, flex: 1, padding: "6px 8px", background: "#1a1f3a", border: "1px solid #1e2d5a", borderRadius: 6, color: "#fff", fontSize: 12 }} />
@@ -811,7 +778,7 @@ export default function App() {
             ) : (
               <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
                 <span style={{ fontSize: 11, color: "#4caf50", fontWeight: 700 }}>
-                  ✓ ADMIN {authUser?.email ? `• ${authUser.email}` : "• PIN"}
+                  ✓ ADMIN • {authUser?.email}
                 </span>
                 <button onClick={exportarBackup} style={{ padding: "4px 8px", background: "none", border: "1px solid #1e2d5a", borderRadius: 6, color: "#FFD700", fontSize: 11, cursor: "pointer" }}>JSON</button>
                 <button onClick={exportarCSV} style={{ padding: "4px 8px", background: "none", border: "1px solid #1e2d5a", borderRadius: 6, color: "#6CABDD", fontSize: 11, cursor: "pointer" }}>CSV</button>
@@ -1128,9 +1095,7 @@ export default function App() {
                       </div>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
                         {votacao.aberta && (
-                          <button onClick={(e) => { e.stopPropagation(); abrirModalVotacao(key, r.rodada, ji, jogo[0], jogo[1]) }}
-                            style={{ background: "#22c55e22", border: "1px solid #22c55e66", borderRadius: 6, padding: "6px 8px", cursor: "pointer", color: "#22c55e", fontSize: 12, fontWeight: 800 }}
-                          >Votar</button>
+                          <span title="Votação pública temporariamente suspensa por segurança" style={{ border: "1px solid #64748b66", borderRadius: 6, padding: "6px 8px", color: "#94a3b8", fontSize: 11 }}>Votação suspensa</span>
                         )}
                         {res && (
                           <button onClick={(e) => { e.stopPropagation(); compartilharVotacao(key, jogo) }}
@@ -1352,14 +1317,14 @@ export default function App() {
             })()}
 
             {/* Semifinais */}
-            <div style={{ fontWeight: 700, color: "#FFD700", fontSize: 13, letterSpacing: 1, marginBottom: 10 }}>SEMIFINAIS (29+1+29 min)</div>
+            <div style={{ fontWeight: 700, color: "#FFD700", fontSize: 13, letterSpacing: 1, marginBottom: 10 }}>SEMIFINAIS (15 + 15 min por jogo)</div>
 
-            {MATA_MATA.filter(f => f.fase.includes("Semi")).slice(0,1).map((fase, fi) => (
+            {MATA_MATA.filter(f => f.fase.includes("Semi")).map((fase, fi) => (
               <div key={fi}>
                 {fase.jogos.map((jogo, ji) => (
                   <div key={ji} style={{ ...S.card, marginBottom: 8 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                      <div style={{ fontSize: 11, color: "#6b7db3" }}>SEMI {ji + 1} — ida {fase.data} / volta 18/09</div>
+                      <div style={{ fontSize: 11, color: "#6b7db3" }}> {fase.fase.toUpperCase()} • SEMI {ji + 1} • {fase.data}/2026</div>
                       <div style={{ fontSize: 11, color: "#FFD700" }}>⏰ {jogo[2]}</div>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 16 }}>
@@ -1650,59 +1615,18 @@ export default function App() {
         )
       })()}
 
-      {/* MODAL VOTACAO */}
+      {/* MODAL VOTACAO — temporariamente suspenso por segurança */}
       {modalVotacao && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.9)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 220, padding: 16 }}>
-          <div style={{ background: "#111827", border: "1px solid #22c55e55", borderRadius: 16, width: "100%", maxWidth: 440, maxHeight: "90vh", overflowY: "auto", padding: 20 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
-              <div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: "#22c55e" }}>Votação do Jogo</div>
-                <div style={{ fontSize: 12, color: "#8899cc", marginTop: 4 }}>{modalVotacao.casa} x {modalVotacao.fora}</div>
-              </div>
-              <button onClick={() => setModalVotacao(null)}
-                style={{ background: "none", border: "none", color: "#6b7db3", fontSize: 22, cursor: "pointer" }}>x</button>
+          <div style={{ background: "#111827", border: "1px solid #64748b", borderRadius: 16, width: "100%", maxWidth: 440, padding: 20 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <strong style={{ color: "#FFD700" }}>Votação temporariamente suspensa</strong>
+              <button onClick={() => setModalVotacao(null)} style={{ background: "none", border: "none", color: "#fff", fontSize: 22 }}>×</button>
             </div>
-
-            <input
-              placeholder="CPF para controlar voto único"
-              value={cpfVotacao}
-              onChange={e => setCpfVotacao(formatarCPF(e.target.value))}
-              inputMode="numeric"
-              maxLength={14}
-              style={S.select}
-            />
-
-            <div style={{ fontSize: 11, color: "#6b7db3", marginBottom: 10 }}>
-              Dê notas de 0 a 10. A maior média vira o MVP automático, mas o admin ainda pode trocar na súmula.
-            </div>
-
-            {modalVotacao.jogadores.map(j => (
-              <div key={j.nome} style={{ display: "grid", gridTemplateColumns: "1fr 82px", gap: 10, alignItems: "center", padding: "8px 0", borderBottom: "1px solid #1e2d5a" }}>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 13 }}>{j.nome}</div>
-                  <div style={{ fontSize: 10, color: "#6b7db3" }}>{TIMES.find(t => t.id === getTimeDoJogador(j.nome, modalVotacao.rodada))?.nome || "Goleiro"}</div>
-                </div>
-                <input
-                  type="number"
-                  min="0"
-                  max="10"
-                  step="0.5"
-                  value={notasVotacao[j.nome] ?? ""}
-                  onChange={e => {
-                    const valor = e.target.value
-                    if (valor === "" || (Number(valor) >= 0 && Number(valor) <= 10)) {
-                      setNotasVotacao(prev => ({ ...prev, [j.nome]: valor }))
-                    }
-                  }}
-                  style={{ ...S.select, marginBottom: 0, textAlign: "center" }}
-                />
-              </div>
-            ))}
-
-            {votoErro && <div style={{ color: "#f44336", fontSize: 12, marginTop: 12 }}>{votoErro}</div>}
-            <button onClick={salvarVoto} style={{ ...S.btnSalvar, marginTop: 16, background: "linear-gradient(135deg, #22c55e, #86efac)" }}>
-              Enviar Voto
-            </button>
+            <p style={{ color: "#cbd5e1", fontSize: 13, lineHeight: 1.6 }}>
+              O mecanismo anterior usava um hash de CPF gerado no navegador e não garantia voto único nem proteção dos dados. A votação será reativada após a implantação de validação segura no servidor.
+            </p>
+            <button onClick={() => setModalVotacao(null)} style={{ ...S.btn, marginTop: 12 }}>Fechar</button>
           </div>
         </div>
       )}

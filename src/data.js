@@ -87,7 +87,7 @@ export const RODADAS = [
   { rodada: 3, data: "17/07", jogos: [["Chelsea","Milan","19:30"],["Juventus","Roma","20:10"],["Real Madrid","Barcelona","20:51"]] },
   { rodada: 4, data: "24/07", jogos: [["Chelsea","Barcelona","19:30"],["Juventus","Milan","20:10"],["Real Madrid","Roma","20:51"]] },
   { rodada: 5, data: "31/07", jogos: [["Chelsea","Roma","19:30"],["Juventus","Real Madrid","20:10"],["Milan","Barcelona","20:51"]] },
-  { rodada: 6, data: "07/08", jogos: [["Juventus","Chelsea","19:30"],["Milan","Juventus","20:10"],["Roma","Chelsea","20:51"]] },
+  { rodada: 6, data: "07/08", jogos: [["Juventus","Chelsea","19:30"],["Milan","Real Madrid","20:10"],["Roma","Barcelona","20:51"]] },
   { rodada: 7, data: "14/08", jogos: [["Real Madrid","Chelsea","19:30"],["Barcelona","Juventus","20:10"],["Roma","Milan","20:51"]] },
   { rodada: 8, data: "21/08", jogos: [["Milan","Chelsea","19:30"],["Roma","Juventus","20:10"],["Barcelona","Real Madrid","20:51"]] },
   { rodada: 9, data: "28/08", jogos: [["Barcelona","Chelsea","19:30"],["Milan","Juventus","20:10"],["Roma","Real Madrid","20:51"]] },
