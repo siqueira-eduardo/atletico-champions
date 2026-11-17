@@ -1,63 +1,40 @@
 {
   "rules": {
     ".read": true,
-    "resultados": { ".write": "auth != null" },
-    "gols": { ".write": "auth != null" },
-    "assistencias": { ".write": "auth != null" },
-    "mvps": { ".write": "auth != null" },
-    "sumulas": { ".write": "auth != null" },
-    "historicoSumulas": { ".write": "auth != null" },
-    "fotos": { ".write": "auth != null" },
+    ".write": false,
+    "admins": {
+      "$uid": {
+        ".write": false
+      }
+    },
+    "resultados": {
+      ".write": "auth != null && root.child('admins').child(auth.uid).val() === true"
+    },
+    "gols": {
+      ".write": "auth != null && root.child('admins').child(auth.uid).val() === true"
+    },
+    "assistencias": {
+      ".write": "auth != null && root.child('admins').child(auth.uid).val() === true"
+    },
+    "mvps": {
+      ".write": "auth != null && root.child('admins').child(auth.uid).val() === true"
+    },
+    "sumulas": {
+      ".write": "auth != null && root.child('admins').child(auth.uid).val() === true"
+    },
+    "historicoSumulas": {
+      ".write": "auth != null && root.child('admins').child(auth.uid).val() === true"
+    },
+    "fotos": {
+      ".write": "auth != null && root.child('admins').child(auth.uid).val() === true"
+    },
     "votacoes": {
       "$jogo": {
-        "aberta": {
-          ".write": "auth != null",
-          ".validate": "newData.isBoolean()"
-        },
-        "rodada": {
-          ".write": "auth != null",
-          ".validate": "newData.isNumber()"
-        },
-        "jogoIdx": {
-          ".write": "auth != null",
-          ".validate": "newData.isNumber()"
-        },
-        "casa": {
-          ".write": "auth != null",
-          ".validate": "newData.isString()"
-        },
-        "fora": {
-          ".write": "auth != null",
-          ".validate": "newData.isString()"
-        },
+        ".write": "auth != null && root.child('admins').child(auth.uid).val() === true",
         "votos": {
           "$cpfHash": {
-            ".write": "auth != null || (!data.exists() && root.child('votacoes').child($jogo).child('aberta').val() === true)",
-            ".validate": "newData.hasChildren(['notas', 'criadoEm'])",
-            "notas": {
-              "$idx": {
-                ".validate": "newData.hasChildren(['jogador', 'nota'])",
-                "jogador": {
-                  ".validate": "newData.isString()"
-                },
-                "nota": {
-                  ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10"
-                },
-                "$other": {
-                  ".validate": false
-                }
-              }
-            },
-            "criadoEm": {
-              ".validate": "newData.isString()"
-            },
-            "$other": {
-              ".validate": false
-            }
+            ".write": "auth != null && root.child('admins').child(auth.uid).val() === true"
           }
-        },
-        "$other": {
-          ".write": "auth != null"
         }
       }
     }
