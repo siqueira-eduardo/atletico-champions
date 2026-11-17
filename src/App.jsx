@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { ref, onValue, set, push, update, runTransaction } from 'firebase/database'
+import { ref, onValue, set, push, update } from 'firebase/database'
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth'
 import { auth, db } from './firebase'
 import { TIMES, JOGADORES, GOLEIROS, RODADAS, TABS, TIMES_INCOMPLETOS, REGRAS, MATA_MATA } from './data'
@@ -700,46 +700,8 @@ export default function App() {
     setVotoErro("")
   }
 
-  const salvarVoto = async () => {
-    if (!modalVotacao) return
-    setVotoErro("A votação pública está temporariamente suspensa enquanto a proteção contra votos duplicados é corrigida.")
-    return
-    const cpf = normalizarCPF(cpfVotacao)
-    if (cpf.length !== 11) {
-      setVotoErro("Informe um CPF com 11 dígitos.")
-      return
-    }
-    const chaveCPF = await gerarChaveCPF(cpf)
-    if (votosAdmin[modalVotacao.key]?.votos?.[chaveCPF]) {
-      setVotoErro("Este CPF já votou nesse jogo.")
-      return
-    }
-    const notas = []
-    modalVotacao.jogadores.forEach(j => {
-      const valor = Number(notasVotacao[j.nome])
-      if (Number.isFinite(valor) && valor >= 0 && valor <= 10) notas.push({ jogador: j.nome, nota: valor })
-    })
-    if (notas.length === 0) {
-      setVotoErro("Dê pelo menos uma nota de 0 a 10.")
-      return
-    }
-    try {
-      const resultado = await runTransaction(ref(db, `votacoes/${modalVotacao.key}/votos/${chaveCPF}`), votoAtual => {
-        if (votoAtual) return
-        return {
-          notas,
-          criadoEm: new Date().toISOString(),
-        }
-      })
-      if (!resultado.committed) {
-        setVotoErro("Este CPF já votou nesse jogo.")
-        return
-      }
-      mostrarAviso("Voto registrado. Obrigado!", "sucesso")
-      setModalVotacao(null)
-    } catch (error) {
-      setVotoErro("Não foi possível registrar o voto. Tente novamente.")
-    }
+  const salvarVoto = () => {
+    setVotoErro("A votação pública está suspensa até a implantação de validação segura no servidor.")
   }
 
   const definirVotacao = async (key, aberta, jogo, rodada, jogoIdx) => {
@@ -1673,59 +1635,18 @@ export default function App() {
         )
       })()}
 
-      {/* MODAL VOTACAO */}
+      {/* MODAL VOTACAO — temporariamente suspenso por segurança */}
       {modalVotacao && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.9)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 220, padding: 16 }}>
-          <div style={{ background: "#111827", border: "1px solid #22c55e55", borderRadius: 16, width: "100%", maxWidth: 440, maxHeight: "90vh", overflowY: "auto", padding: 20 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
-              <div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: "#22c55e" }}>Votação do Jogo</div>
-                <div style={{ fontSize: 12, color: "#8899cc", marginTop: 4 }}>{modalVotacao.casa} x {modalVotacao.fora}</div>
-              </div>
-              <button onClick={() => setModalVotacao(null)}
-                style={{ background: "none", border: "none", color: "#6b7db3", fontSize: 22, cursor: "pointer" }}>x</button>
+          <div style={{ background: "#111827", border: "1px solid #64748b", borderRadius: 16, width: "100%", maxWidth: 440, padding: 20 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <strong style={{ color: "#FFD700" }}>Votação temporariamente suspensa</strong>
+              <button onClick={() => setModalVotacao(null)} style={{ background: "none", border: "none", color: "#fff", fontSize: 22 }}>×</button>
             </div>
-
-            <input
-              placeholder="CPF para controlar voto único"
-              value={cpfVotacao}
-              onChange={e => setCpfVotacao(formatarCPF(e.target.value))}
-              inputMode="numeric"
-              maxLength={14}
-              style={S.select}
-            />
-
-            <div style={{ fontSize: 11, color: "#6b7db3", marginBottom: 10 }}>
-              Dê notas de 0 a 10. A maior média vira o MVP automático, mas o admin ainda pode trocar na súmula.
-            </div>
-
-            {modalVotacao.jogadores.map(j => (
-              <div key={j.nome} style={{ display: "grid", gridTemplateColumns: "1fr 82px", gap: 10, alignItems: "center", padding: "8px 0", borderBottom: "1px solid #1e2d5a" }}>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 13 }}>{j.nome}</div>
-                  <div style={{ fontSize: 10, color: "#6b7db3" }}>{TIMES.find(t => t.id === getTimeDoJogador(j.nome, modalVotacao.rodada))?.nome || "Goleiro"}</div>
-                </div>
-                <input
-                  type="number"
-                  min="0"
-                  max="10"
-                  step="0.5"
-                  value={notasVotacao[j.nome] ?? ""}
-                  onChange={e => {
-                    const valor = e.target.value
-                    if (valor === "" || (Number(valor) >= 0 && Number(valor) <= 10)) {
-                      setNotasVotacao(prev => ({ ...prev, [j.nome]: valor }))
-                    }
-                  }}
-                  style={{ ...S.select, marginBottom: 0, textAlign: "center" }}
-                />
-              </div>
-            ))}
-
-            {votoErro && <div style={{ color: "#f44336", fontSize: 12, marginTop: 12 }}>{votoErro}</div>}
-            <button onClick={salvarVoto} style={{ ...S.btnSalvar, marginTop: 16, background: "linear-gradient(135deg, #22c55e, #86efac)" }}>
-              Enviar Voto
-            </button>
+            <p style={{ color: "#cbd5e1", fontSize: 13, lineHeight: 1.6 }}>
+              O mecanismo anterior usava um hash de CPF gerado no navegador e não garantia voto único nem proteção dos dados. A votação será reativada após a implantação de validação segura no servidor.
+            </p>
+            <button onClick={() => setModalVotacao(null)} style={{ ...S.btn, marginTop: 12 }}>Fechar</button>
           </div>
         </div>
       )}
