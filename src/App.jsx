@@ -12,6 +12,7 @@ export default function App() {
   const [mvps, setMvps] = useState({})
   const [sumulas, setSumulas] = useState({})
   const [votacoes, setVotacoes] = useState({})
+  const [votosAdmin, setVotosAdmin] = useState({})
   const [modalJogo, setModalJogo] = useState(null)
   const [modalVotacao, setModalVotacao] = useState(null)
   const [formGol, setFormGol] = useState({ jogador: "", assistencia: "" })
@@ -57,7 +58,7 @@ export default function App() {
       { key: 'assistencias', setter: setAssistencias },
       { key: 'mvps', setter: setMvps },
       { key: 'sumulas', setter: setSumulas },
-      { key: 'votacoes', setter: setVotacoes },
+      { key: 'votacoesPublicas', setter: setVotacoes },
       { key: 'fotos', setter: setFotos },
       { key: 'historicoSumulas', setter: setHistoricoSumulas },
     ]
@@ -76,15 +77,21 @@ export default function App() {
 
   useEffect(() => {
     let unsubscribeAdmin = null
+    let unsubscribeVotes = null
     const unsubscribeAuth = onAuthStateChanged(auth, user => {
       if (unsubscribeAdmin) {
         unsubscribeAdmin()
         unsubscribeAdmin = null
       }
+      if (unsubscribeVotes) {
+        unsubscribeVotes()
+        unsubscribeVotes = null
+      }
       setAuthUser(user)
       if (!user) {
         setIsAdmin(false)
         setAdminModo(null)
+        setVotosAdmin({})
         return
       }
 
@@ -93,7 +100,12 @@ export default function App() {
         setIsAdmin(autorizado)
         setAdminModo(autorizado ? "firebase" : null)
         setAuthError(autorizado ? "" : "Conta autenticada, mas sem permissão administrativa.")
-        if (!autorizado) signOut(auth).catch(() => {})
+        if (autorizado) {
+          unsubscribeVotes = onValue(ref(db, "votacoes"), votesSnapshot => setVotosAdmin(votesSnapshot.val() || {}))
+        } else {
+          setVotosAdmin({})
+          signOut(auth).catch(() => {})
+        }
       }, () => {
         setIsAdmin(false)
         setAdminModo(null)
@@ -103,6 +115,7 @@ export default function App() {
 
     return () => {
       if (unsubscribeAdmin) unsubscribeAdmin()
+      if (unsubscribeVotes) unsubscribeVotes()
       unsubscribeAuth()
     }
   }, [])
@@ -221,7 +234,7 @@ export default function App() {
   }
 
   const calcMediasVotacao = (key) => {
-    const votos = Object.values(votacoes[key]?.votos || {})
+    const votos = Object.values(votosAdmin[key]?.votos || {})
     const notas = {}
     votos.forEach(voto => {
       getNotasDoVoto(voto).forEach(([nome, nota]) => {
@@ -239,7 +252,7 @@ export default function App() {
 
   const calcNotasGerais = () => {
     const notas = {}
-    Object.entries(votacoes).forEach(([key, votacao]) => {
+    Object.entries(votosAdmin).forEach(([key, votacao]) => {
       Object.values(votacao?.votos || {}).forEach(voto => {
         getNotasDoVoto(voto).forEach(([nome, nota]) => {
           const valor = Number(nota)
@@ -488,6 +501,7 @@ export default function App() {
       mvps,
       sumulas,
       votacoes,
+      votosAdmin,
       fotos,
       historicoSumulas,
     }
@@ -688,17 +702,15 @@ export default function App() {
 
   const salvarVoto = async () => {
     if (!modalVotacao) return
-    if (!votacoes[modalVotacao.key]?.aberta) {
-      setVotoErro("A votação deste jogo está fechada.")
-      return
-    }
+    setVotoErro("A votação pública está temporariamente suspensa enquanto a proteção contra votos duplicados é corrigida.")
+    return
     const cpf = normalizarCPF(cpfVotacao)
     if (cpf.length !== 11) {
       setVotoErro("Informe um CPF com 11 dígitos.")
       return
     }
     const chaveCPF = await gerarChaveCPF(cpf)
-    if (votacoes[modalVotacao.key]?.votos?.[chaveCPF]) {
+    if (votosAdmin[modalVotacao.key]?.votos?.[chaveCPF]) {
       setVotoErro("Este CPF já votou nesse jogo.")
       return
     }
@@ -739,6 +751,7 @@ export default function App() {
         [`votacoes/${key}/jogoIdx`]: jogoIdx,
         [`votacoes/${key}/casa`]: jogo[0],
         [`votacoes/${key}/fora`]: jogo[1],
+        [`votacoesPublicas/${key}`]: { aberta, rodada, jogoIdx, casa: jogo[0], fora: jogo[1] },
       })
       mostrarAviso(aberta ? "Votação aberta para este jogo." : "Votação fechada.", "sucesso")
     } catch (error) {
@@ -1140,9 +1153,7 @@ export default function App() {
                       </div>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
                         {votacao.aberta && (
-                          <button onClick={(e) => { e.stopPropagation(); abrirModalVotacao(key, r.rodada, ji, jogo[0], jogo[1]) }}
-                            style={{ background: "#22c55e22", border: "1px solid #22c55e66", borderRadius: 6, padding: "6px 8px", cursor: "pointer", color: "#22c55e", fontSize: 12, fontWeight: 800 }}
-                          >Votar</button>
+                          <span title="Votação pública temporariamente suspensa por segurança" style={{ border: "1px solid #64748b66", borderRadius: 6, padding: "6px 8px", color: "#94a3b8", fontSize: 11 }}>Votação suspensa</span>
                         )}
                         {res && (
                           <button onClick={(e) => { e.stopPropagation(); compartilharVotacao(key, jogo) }}
